@@ -1,0 +1,33 @@
+# ---- Python / uv ----
+.venv/
+.uv/
+__pycache__/
+.pytest_cache/
+*.py[oc]
+.mypy_cache/
+.ruff_cache/
+.coverage
+.python-version
+build/
+dist/
+wheels/
+*.egg-info
+
+
+# ---- Visual Studio / .NET ----
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+TestResults/
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+
+# ---- Other common ----
+.DS_Store
+Thumbs.db
