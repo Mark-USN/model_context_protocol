@@ -1,0 +1,6 @@
+{
+    "name": "countries",
+    "uri": "file://./data/countries.json",
+    "mime": "application/json",
+    "version": "2025-10-01"
+}

@@ -570,10 +570,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
+    { name = "pywin32" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fastmcp", specifier = ">=2.12.4" }]
+requires-dist = [
+    { name = "fastmcp", specifier = ">=2.12.4" },
+    { name = "pywin32", specifier = ">=311" },
+]
 
 [[package]]
 name = "more-itertools"

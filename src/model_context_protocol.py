@@ -10,7 +10,7 @@ import subprocess
 import signal
 from pathlib import Path
 
-import modules.mcp_servers
+# import modules.mcp_servers.demo_server as demo_server
 import modules.mcp_clients as mcp_clients
 
 # ---- Paths (PID & LOG live next to this file) ----

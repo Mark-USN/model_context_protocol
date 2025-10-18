@@ -1,0 +1,42 @@
+Folder PATH listing for volume OS
+Volume serial number is 585C-752C
+C:.
+|   dirTree.txt
+|   
++---mcp_clients
+|   |   universal_client.py
+|   |   __init__.py
+|   |   
+|   \---__pycache__
+|           universal_client.cpython-312.pyc
+|           __init__.cpython-312.pyc
+|           
+\---mcp_servers
+    |   demo_server.py
+    |   loader.py
+    |   registry.py
+    |   __init__.py
+    |   
+    +---data
+    |       countries.json
+    |       
+    +---prompts
+    |       summarize.md
+    |       
+    +---resources
+    |       countries.resource.json
+    |       
+    +---tools
+    |   |   math_tools.py
+    |   |   __init__.py
+    |   |   
+    |   \---__pycache__
+    |           math_tools.cpython-312.pyc
+    |           __init__.cpython-312.pyc
+    |           
+    \---__pycache__
+            demo_server.cpython-312.pyc
+            loader.cpython-312.pyc
+            registry.cpython-312.pyc
+            __init__.cpython-312.pyc
+            
