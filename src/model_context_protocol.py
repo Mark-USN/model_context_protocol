@@ -1,5 +1,5 @@
 # model_context_protocol.py
-# 20251010 MMH A script to start/stop a detached MCP server or run a client.
+# 20251010 MMH A script to start/stop a detached MCP server or run a client. 
 
 import sys
 import os

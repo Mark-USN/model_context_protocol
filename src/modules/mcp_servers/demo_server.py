@@ -30,7 +30,7 @@ mcp = FastMCP(
 _THIS_DIR = Path(__file__).resolve().parent
 _PROMPTS_DIR = _THIS_DIR / "prompts"
 _RESOURCES_DIR = _THIS_DIR / "resources"
-_TOOLS_PKG = __package__ + ".tools"  # "mcp_servers.tools"
+_TOOLS_PKG = __package__ + ".tools"  # "mcp_servers.tools" 
 
 # -------------------------------------------------------------------
 # One-time attach: import tool modules, load prompts/resources, register
