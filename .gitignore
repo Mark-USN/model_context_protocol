@@ -31,3 +31,7 @@ TestResults/
 # ---- Other common ----
 .DS_Store
 Thumbs.db
+uv.lock
+model_context_protocol.sln
+model_context_protocol.pyproj
+model_context_protocol.pyproj.user
