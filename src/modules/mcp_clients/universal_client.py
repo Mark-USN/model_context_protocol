@@ -29,7 +29,7 @@ class universal_client(Client):
                 if hasattr(tool, 'meta') and tool.meta:
                     fastmcp_meta = tool.meta.get('_fastmcp', {})
                     print(f"Tags: {fastmcp_meta.get('tags', [])}")
-
+                print("")
             resources = await self.list_resources()
             print("\nNo Resources available.\n" if not resources else "\nAvailable Resources:\n")
             for resource in resources:
@@ -41,6 +41,7 @@ class universal_client(Client):
                 if hasattr(resource, '_meta') and resource._meta:
                     fastmcp_meta = resource._meta.get('_fastmcp', {})
                     print(f"Tags: {fastmcp_meta.get('tags', [])}")
+                print("")
 
 
             templates = await self.list_resource_templates()
@@ -53,6 +54,7 @@ class universal_client(Client):
                 if hasattr(template, '_meta') and template._meta:
                     fastmcp_meta = template._meta.get('_fastmcp', {})
                     print(f"Tags: {fastmcp_meta.get('tags', [])}")
+                print("")
 
 
             prompts = await self.list_prompts()
@@ -66,6 +68,7 @@ class universal_client(Client):
                 if hasattr(prompt, '_meta') and prompt._meta:
                     fastmcp_meta = prompt._meta.get('_fastmcp', {})
                     print(f"Tags: {fastmcp_meta.get('tags', [])}")
+                print("")
             
             # Execute operations
             result = await self.call_tool("add", {"a": 5, "b": 3})
