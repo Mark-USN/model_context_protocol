@@ -35,6 +35,6 @@ uv.lock
 stuff/
 mcp.pid
 mcp.log
-model_context_protocol.sln
-model_context_protocol.pyproj
-model_context_protocol.pyproj.user
+*.sln
+*.pyproj
+*.pyproj.user
