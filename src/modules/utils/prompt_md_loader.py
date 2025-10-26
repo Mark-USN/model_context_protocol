@@ -1,7 +1,7 @@
 ﻿# prompt_md_loader.py
 from __future__ import annotations
 """
-Dynamic discovery and registration of MCP prompts.
+Dynamic discovery and registration of MCP prompts from markdown (.md) files.
 """
 
 
@@ -11,9 +11,9 @@ imports them safely, and registers them into an MCP server.
 """
 from operator import contains
 import re
+import logging
 from pathlib import Path
 from typing import Iterable, TypeVar, Dict
-from venv import logger
 from fastmcp import FastMCP  # or import your `mcp` instance
 
 T = TypeVar("T", bound=FastMCP)
@@ -97,7 +97,7 @@ def _parse_front_matter(fm_txt: str):
         "description": description,
     }
 
-def register_prompts_from_markdown(mpc: T, prompts_dir: str | Path) -> None:
+def register_prompts_from_markdown(mcp: T, prompts_dir: str | Path) -> None:
     """
     register_prompts_from_markdown. Scan for .md files in the prompts directory 
     and register them with FastMCP.
@@ -111,7 +111,7 @@ def register_prompts_from_markdown(mpc: T, prompts_dir: str | Path) -> None:
         Adds Prompts to the FastMCP server for any successfully converted .md files.
 
     """
-    if isinstance(input_path, Path):
+    if isinstance(prompts_dir, Path):
         prompts_path = prompts_dir
     else:
         prompts_path = Path(prompts_dir)
@@ -156,7 +156,7 @@ def register_prompts_from_markdown(mpc: T, prompts_dir: str | Path) -> None:
         fn = make_func(body)  # registration happens via decorator
 
         # demo_server looks for the "public" tag to expose tools
-        if tags not in "public":
+        if "public" not in tags:
             tags.add("public")
 
         # Register the prompt with FastMCP

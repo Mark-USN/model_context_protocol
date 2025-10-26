@@ -5,9 +5,12 @@ import json
 import subprocess
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TypeVar
+from fastmcp import FastMCP
 
-logger = logging.getLogger("tools.youtube_to_text")
+T = TypeVar("T", bound="FastMCP")
+
+logger = logging.getLogger(Path(__file__).stem)
 
 FFMPEG_DIR = r""  # Example: r"C:\Program Files\ffmpeg\bin"
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
@@ -171,10 +174,10 @@ def youtube_to_text(url: str, force_whisper: bool = False) -> str:
 
 
 # ----------------- MCP integration -----------------
-def register(mcp):
+def register(mcp: T):
     logger.debug("Registrando tool youtube_transcript")
 
-    @mcp.tool()
+    @mcp.tool(tags=["public"])
     def youtube_transcript(url: str) -> dict:
         """
         Extrae el transcript de un video de YouTube.

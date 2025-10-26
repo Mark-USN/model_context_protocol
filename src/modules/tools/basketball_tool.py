@@ -41,7 +41,7 @@ def get_team_stats(team_name: str) -> Dict[str, Any]:
 def register(mcp: T):
     """Register basketball tools with MCPServer."""
     logger.info("Registering basketball tools")
-    mcp.tool()(get_team_stats)
+    mcp.tool(tags=["public"])(get_team_stats)
 
 
 # -----------------------
