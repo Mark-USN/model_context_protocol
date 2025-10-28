@@ -74,6 +74,10 @@ class universal_client(Client):
             result = await self.call_tool("add", {"a": 5, "b": 3})
             print(f"Result of add tool: {result}")
 
+            # result = await self.call_tool("add", {"a": 5, "b": 3})
+            # print(f"Result of add tool: {result}")
+
+
 
 if __name__ == "__main__":
     asyncio.run(universal_client("127.0.0.1", 8085).run())

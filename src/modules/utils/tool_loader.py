@@ -125,8 +125,6 @@ def discover_tools(package: str = ".tools") -> List[ModuleType]:
         # into subpackages and 'flatten' them into the main package namespace. 
         if ispkg :
             continue
-        # if ispkg or not modname.endswith("_tool"):
-        #     continue
 
         full_name = f"{package}.{modname}"
         try:
@@ -152,13 +150,9 @@ def register_tools(mcp: T, package: Path | str = "../tools") -> None:
     else:
         tools_pkg = Path(package)
 
-
-
     if not tools_pkg.exists() or not tools_pkg.is_dir():
         logger.exception(f"❌ Prompts directory {tools_pkg} does not exist or is not a directory.")
         return
-
-
 
     mod, module_name = load_module_from_path(path=tools_pkg, sys_path_root=_REL_PATH,
                           module_name="tools", add_sys_path=True)

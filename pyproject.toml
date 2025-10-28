@@ -12,6 +12,8 @@ dependencies = [
     "fastmcp>=2.12.4",
     "python-frontmatter>=1.1.0",
     "pywin32>=311",
+    "whisper>=1.1.10",
+    "youtube-transcript-api>=1.2.3",
 ]
 # Add real deps as needed, e.g.:
 # dependencies = ["fastmcp>=2.0"]
