@@ -2,16 +2,20 @@ import re
 import json
 import logging
 import subprocess
+from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional, TypeVar
 # 20251027 MMH Moved youTube api imports to here.
-from youtube_transcript_api import YouTubeTranscriptApi, FetchedTranscript
+from youtube_transcript_api import (
+    YouTubeTranscriptApi, 
+    FetchedTranscript,
+    NotTranslatable, 
+    TranslationLanguageNotAvailable
+)
 # 20251027 MMH Added youTube api formatters. 
 from youtube_transcript_api.formatters import (
    JSONFormatter, 
    PrettyPrintFormatter, 
-   NotTranslatable, 
-   TranslationLanguageNotAvailable
 )
 
 from fastmcp import FastMCP
@@ -68,7 +72,9 @@ def get_video_id(url: str) -> str:
 
 # def fetch_subtitles(video_id: str, prefer_langs: Optional[List[str]] = None) -> Optional[List[dict]]:
 def fetch_transcript(video_id: str, prefer_langs: Optional[List[str]] = None) -> Optional[FetchedTranscript]:
-    """ Try to fetch YouTube subtitles if available.
+    """ 
+    Return the transcript for the YouTube video with the given ID.
+        Params: video_id, prefer_lang,
         Return: youtube transcript or None
     """
     # 20251027 MMH Changed to return youTube api raw format directly so that formatters could be used.
@@ -146,20 +152,58 @@ def save_txt_and_json_from_subtitles(entries: list[dict], video_id: str) -> tupl
 
 def get_json_transcript(raw_transcript: FetchedTranscript)->str:
     """
-        get_json_transcript
+    Returns the json formatted transcript of a YouTube video.
         Params: raw_transcript The transcript returned by youTube
-        Returns: A json formatted variation of the data
+        Returns: A string containing the json formatted variation of the transcript.
     """
     # .format_transcript(transcript) turns the transcript into a JSON string.
     return JSONFormatter().format_transcript(raw_transcript, indent=2)
 
+
+# def extract_transcript_text(obj, level=0, include_time=False):
+#     """
+#     Recursively extract all 'text' values from a FetchedTranscript structure.
+#     Returns a single formatted string with indentation by level.
+    
+#     Args:
+#         obj: The transcript or list/dict containing transcript entries.
+#         level: Indentation depth (for recursive calls).
+#         include_time: If True, prefix lines with timestamps.
+#     """
+#     result_lines = []
+
+#     if isinstance(obj, dict):
+#         # transcript segment or nested dict
+#         if "text" in obj:
+#             text = obj["text"]
+#             if include_time and "start" in obj:
+#                 prefix = f"[{obj['start']:.1f}s] "
+#             else:
+#                 prefix = ""
+#             result_lines.append("\t" * level + prefix + text)
+#         for value in obj.values():
+#             result_lines.append(extract_transcript_text(value, level + 1, include_time))
+
+#     elif isinstance(obj, list):
+#         # list of segments or nested lists
+#         for item in obj:
+#             result_lines.append(extract_transcript_text(item, level + 1, include_time))
+
+#     return "\n".join(line for line in result_lines if line)
+
+
+
 def get_text_transcript(raw_transcript: FetchedTranscript)->str:
     """
-        get_text_transcript
+    Returns the text formatted transcript of a YouTube video.
         Params: raw_transcript The transcript returned by youTube
-        Returns: The text derived from the transcript and formatted 
+        Returns: The text derived from the transcript as formatted 
+                 by the PrettyPrintFormatter. 
     """
-    # .format_transcript(transcript) turns the transcript into a JSON string.
+
+    # Python could not parse the raw transcript directly so we use the formatter.
+    # json_transcript = get_json_transcript(raw_transcript)
+    # Just get the text parts.
     return PrettyPrintFormatter().format_transcript(raw_transcript)
 
 def save_raw_subtitles(transcript: FetchedTranscript, video_id: str) -> tuple[Path, Path]:
@@ -250,16 +294,16 @@ def save_raw_subtitles(transcript: FetchedTranscript, video_id: str) -> tuple[Pa
 #     return text
 
 
-def youtube_transcript(url: str, prefer_lang: List[str] =  ["en", "es"]) -> FetchedTranscript:
+def youtube_transcript(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
     """
     Extracts the transcript of a YouTube video and return it.
-    Paramts: url The YouTube video URL
-                prefer_lang List of preferred languages for subtitles   
-    Returns: The youTube transcript 
+        Params: url The YouTube video URL
+                prefer_lang List of preferred language IDs for transcripts.   
+        Returns: The youTube formatted transcript .
     """
 
     video_id = get_video_id(url)
-    return fetch_transcript(video_id, prefer_lang)
+    return str(fetch_transcript(video_id, prefer_lang))
     # text = youtube_to_text(url, force_whisper=False)
 
     # video_id = get_video_id(url)
@@ -277,31 +321,51 @@ def youtube_json(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
     """
     Extracts the transcript of a YouTube video and return the transcript 
     formatted as json.
-    Paramts: url The YouTube video URL
-                prefer_lang List of preferred languages for subtitles   
-    Returns: The json format of the youTube transcript 
+        Params: url The YouTube video URL
+                prefer_lang List of preferred language IDs for transcripts.   
+        Returns: The json format of the youTube transcript 
     """
 
     video_id = get_video_id(url)
-    raw_transcript = fetch_transcript(video_id, prefer_lang)
-    return get_json_transcript(raw_transcript)
- 
+    json_trans = get_json_transcript(fetch_transcript(video_id, prefer_lang))
+    return str(json_trans)
     
 def youtube_text(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
     """
     Extracts the transcript of a YouTube video and return the text.
-    Paramts: url The YouTube video URL
-                prefer_lang List of preferred languages for subtitles   
-    Returns: The text of the youTube transcript 
+        Params: url: The YouTube video URL
+                prefer_lang: List of preferred language IDs for transcripts   
+        Returns: The text of the youTube transcript 
     """
-
+    trans_text = ""
     video_id = get_video_id(url)
-    raw_transcript = fetch_transcript(video_id, prefer_lang)
-    return get_text_transcript(raw_transcript)
-         
+    trans = fetch_transcript(video_id, prefer_lang)
+    # converts the transcript to a dictionary
+    trans_list = trans.to_raw_data()
+    # content_list = trans_list[0]
+    # if content_list.type == "text":
+    #     for snippet in content_list.text:
+    #         trans_text += snippet["text"] + " "
+
+    if len(trans_list) != 0:
+        for snippet in trans_list:
+            trans_text += snippet["text"] + " "
+
+    # pretty_trans = get_text_transcript(fetch_transcript(video_id, prefer_lang))
+
+    return trans_text.strip()
+
 
 # ----------------- MCP integration -----------------
 def register(mcp: T):
+    """
+    Register YouTube to text tools with the MCP instance.
+        Params: mcp The MCP instance to register the tools with.`
+        Returns: None
+        Side Effects: Registers the tools with the MCP instance.
+    """
+
+
     logger.debug("Registering tool youtube_transcript")
     mcp.tool(tags=["public", "api"])(youtube_transcript)
     mcp.tool(tags=["public", "api"])(youtube_json)

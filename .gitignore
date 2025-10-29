@@ -35,6 +35,7 @@ uv.lock
 stuff/
 mcp.pid
 mcp.log
+youtube_text_output.*
 *.sln
 *.pyproj
 *.pyproj.user
