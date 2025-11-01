@@ -1,10 +1,13 @@
+from operator import contains
 import re
 import json
 import logging
+import time
 import subprocess
+import whisper
 from dataclasses import asdict
 from pathlib import Path
-from typing import List, Optional, TypeVar
+from typing import List, Dict, Optional, TypeVar
 # 20251027 MMH Moved youTube api imports to here.
 from youtube_transcript_api import (
     YouTubeTranscriptApi, 
@@ -12,20 +15,37 @@ from youtube_transcript_api import (
     NotTranslatable, 
     TranslationLanguageNotAvailable
 )
-# 20251027 MMH Added youTube api formatters. 
-from youtube_transcript_api.formatters import (
-   JSONFormatter, 
-   PrettyPrintFormatter, 
-)
 
 from fastmcp import FastMCP
 
+# TODO 20251027 MMH: Chage to use yt-dlp and ffmpeg modules instead
+#                       of external programs.
+
+# TODO 20251101 MMH: Move ffmpeg.exe into package and allow it's installation
+#                       thru automated means.                      .
+
 T = TypeVar("T", bound="FastMCP")
+
+logging.basicConfig(
+    # level=logging.DEBUG if settings.debug else logging.INFO,
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 logger = logging.getLogger(Path(__file__).stem)
 
-# FFMPEG_DIR = r""  # Example: r"C:\Program Files\ffmpeg\bin"
+
+if "Mark-USN" in __file__:
+    FFMPEG_PATH = r"C:\Program Files\FFmpeg\ffmpeg\bin\ffmpeg.exe"
+else:
+    FFMPEG_PATH = r"C:\Program Files\ffmpeg\bin\ffmpeg.exe"
+
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
+
+# Set to True to force using Whisper even if subtitles are available.
+FORCE_AUDIO_TRANSCRIPT = False
+
 
 # ----------------- Helpers -----------------
 def get_video_id(url: str) -> str:
@@ -45,278 +65,164 @@ def get_video_id(url: str) -> str:
 
     raise ValueError("Invalid YouTube URL")
 
+# ----------------- Main Function to retrieve transcripts  -----------------
 
-# def _normalize_entries_to_dicts(entries: List[object]) -> List[dict]:
-#     """Normalize subtitle objects to dicts with {start, duration, text}."""
-#     normalized = []
-#     for e in entries:
-#         if isinstance(e, dict):
-#             normalized.append({
-#                 "start": float(e.get("start", 0.0)),
-#                 "duration": float(e.get("duration", 0.0)),
-#                 "text": e.get("text", "")
-#             })
-#         else:
-#             start = getattr(e, "start", 0.0)
-#             duration = getattr(e, "duration", 0.0)
-#             text = getattr(e, "text", "")
-#             normalized.append({
-#                 "start": float(start) if start is not None else 0.0,
-#                 "duration": float(duration) if duration is not None else 0.0,
-#                 # 20251026 MMH text is already defaulted to "" in getattr above
-#                 # 
-#                 "text": text
-#             })
-#     return normalized
-
-
-# def fetch_subtitles(video_id: str, prefer_langs: Optional[List[str]] = None) -> Optional[List[dict]]:
-def fetch_transcript(video_id: str, prefer_langs: Optional[List[str]] = None) -> Optional[FetchedTranscript]:
+def fetch_transcript(url:str, prefer_langs: Optional[List[str]] = None) -> FetchedTranscript | Dict | None:
     """ 
     Return the transcript for the YouTube video with the given ID.
-        Params: video_id, prefer_lang,
+        Params: url, prefer_lang,
         Return: youtube transcript or None
     """
-    # 20251027 MMH Changed to return youTube api raw format directly so that formatters could be used.
     # 20251027 MMH Added preserve_formatting=True to fetches.
+    # 20251029 MMH Moved getting video_id to here.
+    # 20251031 MMH added .to_raw_data() to convert yt transcripts to Dicts
 
+    video_id = get_video_id(url)
     prefer_langs = prefer_langs or ["en", "es"]
-    # 20251027 MMH Moved youTube api imports to top of file.
-    # try:
-    #     from youtube_transcript_api import YouTubeTranscriptApi
-    #     # 20251027 MMH Added youTube api formatters. 
-    #     from youtube_transcript_api.formatters import JSONFormatter, TextFormatter
-    # except Exception as e:
-    #     logger.warning("Could not import youtube_transcript_api: %s", e)
-    #     return None
+    transcript = None
 
     try:
         ytt_api = YouTubeTranscriptApi()
         transcripts = ytt_api.list(video_id)
         # 20251027 MMH Log available languages
-        langs = [getattr(tr, "language_code", "?") for tr in transcripts]
-        logger.debug("Available languages: %s", langs)
+        langs_list = [getattr(tr, "language_code", "?") for tr in transcripts]
+        logger.debug("Available languages: %s", langs_list)
 
-        for tr in transcripts:
-            if getattr(tr, "language_code", "") in prefer_langs:
-                return tr.fetch(preserve_formatting=True)
-                # 20251027 MMH Original code below
-                # raw = tr.fetch()
-                # return _normalize_entries_to_dicts(raw)
+        if FORCE_AUDIO_TRANSCRIPT == False and len(langs_list) >= 0:
+            for lang in prefer_langs:
+                if lang in langs_list :
+                    transcript = ytt_api.fetch(video_id, languages=[lang], preserve_formatting=True)
+                    break
+            # Fallback to the first available transcript and try to translate it.
+            if transcript is None:
+                try:
+                    logger.info("Translating transcript to preferred language: %s", prefer_langs[0])
+                    transcript =  transcripts[0].translate(prefer_langs[0]).fetch(preserve_formatting=True) 
+                except (NotTranslatable, TranslationLanguageNotAvailable):
+                    logger.warn(f"Translation failed returning subtitles in default language {langs_list[0]}.")
+                    transcript = transcripts[0].fetch(preserve_formatting=True)
+        if transcript is None:
+            # Returns a dict
+            transcript = fetch_transcript_from_audio(url=url, video_id=video_id, audio_format="mp3" )
 
-        # Fallback to the first available transcript and try to translate it.
-        if transcripts:
-            # 20251027 MMH Original code below
-            # return transcripts[0].fetch(preserve_formatting=True)
-            # raw = transcripts[0].fetch()
-            # return _normalize_entries_to_dicts(raw)
-            try:
-                logger.info("Translating transcript to preferred language: %s", prefer_langs[0])
-                return transcripts[0].translate(prefer_langs[0]).fetch(preserve_formatting=True) 
-            except (NotTranslatable, TranslationLanguageNotAvailable):
-                logger.warn(f"Translation failed returning subtitles in default language {langs[0]}.")
-                return transcripts[0].fetch(preserve_formatting=True)
     except Exception as e:
         logger.warning("Could not fetch subtitles: %s", e)
         return None
 
-    return None
+    return transcript
 
 
 # ----------------- Output management -----------------
 def _get_outputs_dir() -> Path:
     """Base folder for project outputs (inside mymcpserver/outputs)."""
-    return Path(__file__).resolve().parents[1] / "outputs"
+    return Path(__file__).resolve().parents[3] / "outputs"
 
 def _get_transcripts_dir() -> Path:
     out_dir = _get_outputs_dir() / "transcripts"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
-# def _get_audio_dir() -> Path:
-#     out_dir = _get_outputs_dir() / "audio"
-#     out_dir.mkdir(parents=True, exist_ok=True)
-#     return out_dir
+def _get_audio_dir() -> Path:
+    out_dir = _get_outputs_dir() / "audio"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
 
-def save_txt_and_json_from_subtitles(entries: list[dict], video_id: str) -> tuple[Path, Path]:
+
+def save_txt_and_json_from_transcript(transcript: list[dict], video_id: str) -> tuple[Path, Path]:
     out_dir = _get_transcripts_dir()
     txt_path = out_dir / f"transcript_{video_id}.txt"
     json_path = out_dir / f"transcript_{video_id}.json"
+    trans_text = ""
 
-    txt_path.write_text("\n".join(e["text"] for e in entries), encoding="utf-8")
-    json_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+    if transcript == None or len(transcript) == 0:
+        return None
+
+    for snippet in transcript:
+        trans_text += snippet["text"] + " "   
+
+    txt_path.write_text(f"{trans_text}", encoding="utf-8")
+    json_path.write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
 
     logger.info("💾 Saved transcript to %s and %s", txt_path, json_path)
     return txt_path, json_path
 
 
-def get_json_transcript(raw_transcript: FetchedTranscript)->str:
-    """
-    Returns the json formatted transcript of a YouTube video.
-        Params: raw_transcript The transcript returned by youTube
-        Returns: A string containing the json formatted variation of the transcript.
-    """
-    # .format_transcript(transcript) turns the transcript into a JSON string.
-    return JSONFormatter().format_transcript(raw_transcript, indent=2)
+# ----------------- Audio + Whisper -----------------
+def download_audio(url: str, video_id: str, audio_format: str = "mp3") -> Path:
+    """Download audio from a YouTube video using yt-dlp."""
+    audio_dir = _get_audio_dir()
+    audio_name = f"{video_id}"
+    audio_ext = audio_format
 
+    audio_path = audio_dir / f"{video_id}.{audio_format}"
 
-# def extract_transcript_text(obj, level=0, include_time=False):
-#     """
-#     Recursively extract all 'text' values from a FetchedTranscript structure.
-#     Returns a single formatted string with indentation by level.
+    # 20251031 MMH If the file is already cached, skip downloading.
+    if not audio_path.exists():
+        # 20251030 MMH yt-dlp - A feature-rich command-line audio/video downloader
+        #   -x, --extract-audio  Extract audio from video
+        #   -o, --output [TYPES:]TEMPLATE  It is not recommended to add the extension
+        #   -P, --paths [TYPES:]PATH
+        #   --audio-format See Below
+        #   --ffmpeg-location PATH Location of the ffmpeg binary; either the path to 
+        #                          the binary or its containing directory
+        #
+        # 20251030 MMH Audio Formats supported
+        # (currently supported: best (default), aac, alac, flac, m4a, mp3, opus, vorbis, wav)
+
+        cmd = ["yt-dlp", "-x", "--audio-format", audio_format, "-o", audio_name, "-P", 
+                  str(audio_dir),"--ffmpeg-location", FFMPEG_PATH, url]
+
+        logger.debug(f"Running command: {cmd}")
+        # Loads the youtube audio into the specified name and path.
+        # result is just there for debugging purposes.
+        result = subprocess.run(cmd, check=True)
     
-#     Args:
-#         obj: The transcript or list/dict containing transcript entries.
-#         level: Indentation depth (for recursive calls).
-#         include_time: If True, prefix lines with timestamps.
-#     """
-#     result_lines = []
+    # Clean up old audio files (older than 24 hours) in the audio directory.
+    cutoff = time.time() - (24 * 3600)
+    for file in audio_dir.iterdir():
+        if file.is_file():
+            if file.stat().st_mtime < cutoff:
+                file.unlink()
 
-#     if isinstance(obj, dict):
-#         # transcript segment or nested dict
-#         if "text" in obj:
-#             text = obj["text"]
-#             if include_time and "start" in obj:
-#                 prefix = f"[{obj['start']:.1f}s] "
-#             else:
-#                 prefix = ""
-#             result_lines.append("\t" * level + prefix + text)
-#         for value in obj.values():
-#             result_lines.append(extract_transcript_text(value, level + 1, include_time))
-
-#     elif isinstance(obj, list):
-#         # list of segments or nested lists
-#         for item in obj:
-#             result_lines.append(extract_transcript_text(item, level + 1, include_time))
-
-#     return "\n".join(line for line in result_lines if line)
+    return audio_path
 
 
+def transcribe_with_whisper(audio_path: Path, model_name: str = "base") -> Optional[Dict]:
+    """Transcribe an audio file using OpenAI Whisper."""
+    model = whisper.load_model(model_name)
+    # loaded_audio = whisper.load_audio(str(audio_path))
+    # whisper_audio = whisper.pad_or_trim(loaded_audio)
 
-def get_text_transcript(raw_transcript: FetchedTranscript)->str:
-    """
-    Returns the text formatted transcript of a YouTube video.
-        Params: raw_transcript The transcript returned by youTube
-        Returns: The text derived from the transcript as formatted 
-                 by the PrettyPrintFormatter. 
-    """
+    # # make log-Mel spectrogram and move to the same device as the model
+    # mel = whisper.log_mel_spectrogram(whisper_audio, n_mels=model.dims.n_mels).to(model.device)
+    # # detect the spoken language
+    # _, probs = model.detect_language(mel)
+    # logger.info(f"Whisper detected language: {max(probs, key=probs.get)}")
 
-    # Python could not parse the raw transcript directly so we use the formatter.
-    # json_transcript = get_json_transcript(raw_transcript)
-    # Just get the text parts.
-    return PrettyPrintFormatter().format_transcript(raw_transcript)
+    # # decode the audio
+    # options = whisper.DecodingOptions(without_timestamps = False)
 
-def save_raw_subtitles(transcript: FetchedTranscript, video_id: str) -> tuple[Path, Path]:
-    out_dir = _get_transcripts_dir()
-    raw_path = out_dir / f"transcript_{video_id}.raw"
-    txt_path = out_dir / f"transcript_{video_id}.txt"
-    json_path = out_dir / f"transcript_{video_id}.json"
+    transcript = whisper.transcribe(model, str(audio_path) )
 
-    raw_path.write_text(f"{transcript}", encoding="utf-8")
+    # return the recognized text
+    return transcript
 
-    # .format_transcript(transcript) turns the transcript into a JSON string.
-    json_formatted = JSONFormatter().format_transcript(transcript, indent=2)
-    # Now we can write it out to a file.
-    with open(json_path, 'w', encoding='utf-8') as json_file:
-        json_file.write(json_formatted)
-        logger.info(f"💾 Saved transcript to {json_path}")
 
-    # .format_transcript(transcript) turns the transcript into pretty text.
-    pretty_formatted = PrettyPrintFormatter().format_transcript(transcript)
-    # Now we can write it out to a file.
-    with open(txt_path, 'w', encoding='utf-8') as txt_file:
-        txt_file.write(pretty_formatted)
-        logger.info(f"💾 Saved transcript to {txt_path}")
+def fetch_transcript_from_audio(url: str, video_id: str, audio_format: str = "mp3") -> Optional[Dict]:
+    logger.warning("⚠️ No subtitles. Downloading audio and transcribing with Whisper...")
 
-    return raw_path, json_path, txt_path
+    audio_path = download_audio(url, video_id, audio_format)
+    transcript = transcribe_with_whisper(audio_path, model_name="base")
+    # try:
+    #     audio_path.unlink(missing_ok=True)
+    # except Exception as e:
+    #     logger.debug("Could not delete temporary audio file: %s", e)
+    # save_txt_and_json_from_text(text, video_id)
+    return transcript
 
 
 
-# def save_txt_and_json_from_text(text: str, video_id: str) -> tuple[Path, Path]:
-#     out_dir = _get_transcripts_dir()
-#     txt_path = out_dir / f"transcript_{video_id}.txt"
-#     json_path = out_dir / f"transcript_{video_id}.json"
-
-#     txt_path.write_text(text, encoding="utf-8")
-#     json_path.write_text(
-#         json.dumps([{"index": 0, "text": text}], ensure_ascii=False, indent=2),
-#         encoding="utf-8",
-#     )
-
-#     logger.info("💾 Saved transcript to %s and %s", txt_path, json_path)
-#     return txt_path, json_path
-
-
-# # ----------------- Audio + Whisper -----------------
-# def download_audio(url: str, video_id: str, out_ext: str = "mp3") -> Path:
-#     """Download audio from a YouTube video using yt-dlp."""
-#     out_dir = _get_audio_dir()
-#     out_file = out_dir / f"{video_id}.{out_ext}"
-
-#     cmd = ["yt-dlp", "-x", "--audio-format", out_ext, "-o", str(out_file), url]
-#     if FFMPEG_DIR:
-#         cmd.extend(["--ffmpeg-location", FFMPEG_DIR])
-
-#     logger.debug("Running command: %s", " ".join(cmd))
-#     subprocess.run(cmd, check=True)
-
-#     return out_file
-
-
-# def transcribe_with_whisper(path: Path, model_name: str = "base") -> str:
-#     """Transcribe an audio file using OpenAI Whisper."""
-#     import whisper
-#     model = whisper.load_model(model_name)
-#     result = model.transcribe(str(path))
-#     return result.get("text", "").strip()
-
-
-# # ----------------- Pipeline -----------------
-# def youtube_to_text(url: str, force_whisper: bool = False) -> str:
-#     video_id = get_video_id(url)
-
-#     if not force_whisper:
-#         logger.info("Searching for subtitles...")
-#         subs = fetch_subtitles(video_id, PREFERRED_LANGS)
-#         if subs:
-#             logger.info("✅ Subtitles found.")
-#             save_raw_subtitles(subs, video_id)
-#             return " ".join(e["text"] for e in subs)
-
-#     logger.warning("⚠️ No subtitles. Downloading audio and transcribing with Whisper...")
-#     audio = download_audio(url, video_id, out_ext="mp3")
-#     text = transcribe_with_whisper(audio, model_name="base")
-#     try:
-#         audio.unlink(missing_ok=True)
-#     except Exception as e:
-#         logger.debug("Could not delete temporary audio file: %s", e)
-#     save_txt_and_json_from_text(text, video_id)
-#     return text
-
-
-def youtube_transcript(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
-    """
-    Extracts the transcript of a YouTube video and return it.
-        Params: url The YouTube video URL
-                prefer_lang List of preferred language IDs for transcripts.   
-        Returns: The youTube formatted transcript .
-    """
-
-    video_id = get_video_id(url)
-    return str(fetch_transcript(video_id, prefer_lang))
-    # text = youtube_to_text(url, force_whisper=False)
-
-    # video_id = get_video_id(url)
-    # txt_path = _get_transcripts_dir() / f"transcript_{video_id}.txt"
-    # json_path = _get_transcripts_dir() / f"transcript_{video_id}.json"
-
-    # return {
-    #     "text": text,
-    #     "txt_path": str(txt_path),
-    #     "json_path": str(json_path),
-    # }
-
-
+# ----------------- MCP TOOLS -----------------
 def youtube_json(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
     """
     Extracts the transcript of a YouTube video and return the transcript 
@@ -326,9 +232,17 @@ def youtube_json(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
         Returns: The json format of the youTube transcript 
     """
 
-    video_id = get_video_id(url)
-    json_trans = get_json_transcript(fetch_transcript(video_id, prefer_lang))
-    return str(json_trans)
+    transcript = fetch_transcript(url, prefer_lang)
+
+    if transcript is None:
+        return
+    if isinstance(transcript, FetchedTranscript):
+        # Convert to raw data (list of dicts)
+        transcript_list = transcript.to_raw_data()  
+    else:
+        transcript_list = transcript
+    json_transcript = json.dumps(transcript_list, ensure_ascii=False, indent=2)
+    return(json_transcript)
     
 def youtube_text(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
     """
@@ -337,23 +251,18 @@ def youtube_text(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
                 prefer_lang: List of preferred language IDs for transcripts   
         Returns: The text of the youTube transcript 
     """
-    trans_text = ""
-    video_id = get_video_id(url)
-    trans = fetch_transcript(video_id, prefer_lang)
-    # converts the transcript to a dictionary
-    trans_list = trans.to_raw_data()
-    # content_list = trans_list[0]
-    # if content_list.type == "text":
-    #     for snippet in content_list.text:
-    #         trans_text += snippet["text"] + " "
-
-    if len(trans_list) != 0:
-        for snippet in trans_list:
-            trans_text += snippet["text"] + " "
-
-    # pretty_trans = get_text_transcript(fetch_transcript(video_id, prefer_lang))
-
-    return trans_text.strip()
+    transcribed_text = ""
+    transcript = fetch_transcript(url, prefer_lang)
+    if transcript == None:
+        return None
+    if isinstance(transcript, FetchedTranscript):
+        transcript_list = transcript.to_raw_data()
+        for snippet in transcript_list:
+            transcribed_text += snippet["text"] + " "
+    else:
+        transcribed_text = transcript.get("text", "")
+  
+    return transcribed_text.strip()
 
 
 # ----------------- MCP integration -----------------
@@ -365,28 +274,29 @@ def register(mcp: T):
         Side Effects: Registers the tools with the MCP instance.
     """
 
-
     logger.debug("Registering tool youtube_transcript")
-    mcp.tool(tags=["public", "api"])(youtube_transcript)
     mcp.tool(tags=["public", "api"])(youtube_json)
     mcp.tool(tags=["public", "api"])(youtube_text)
 
 
 # ----------------- CLI -----------------
 if __name__ == "__main__":
-    url = ""
+    url = "https://www.youtube.com/watch?v=DAYJZLERqe8"
     while not url:
         url = input("Enter YouTube URL: ").strip()
         if not url:
             logger.warning("⚠️ Please paste a valid YouTube URL.")
-
     try:
         # result = youtube_to_text(url, force_whisper=False)
-        video_id = get_video_id(url)
-        raw_transcript = fetch_transcript(video_id)
-        result = get_text_transcript(raw_transcript)
-        print("\n--- TRANSCRIPT ---\n")
-        print(result)
+        # video_id = get_video_id(url)
+        
+        json_transcript = youtube_json(url)
+        print("\n\n--- JSON TRANSCRIPT ---\n")
+        print(f"{json_transcript}")
+
+        text_transcript = youtube_text(url)
+        print("\n\n--- TEXT TRANSCRIPT ---\n")
+        print(f"{text_transcript}")
     except subprocess.CalledProcessError as e:
         logger.error("❌ yt-dlp/FFmpeg error: %s", e)
     except Exception as e:

@@ -163,26 +163,22 @@ class universal_client(Client):
 
 
 
-            print("\n\nExecuting 'youtube_transcript' tool with parameters https://www.youtube.com/watch?v=DAYJZLERqe8")
-            result = await self.call_tool("youtube_transcript", {"url":"https://www.youtube.com/watch?v=DAYJZLERqe8"})
-            # text = self.extract_text_values_any(result)
-
-            raw_path = Path(__file__).parents[3].resolve() / "youtube_text_output.raw"
-            # Now we can write it out to a file.
-            with open(raw_path, 'w', encoding='utf-8') as raw_file:
-                raw_file.write(str(result))
-                # logger.info(f"💾 Saved transcript to {txt_path}")
-            print(f"Result of youtube_transcript tool in {raw_path}")
-            # print(f"Result of youtube_transcript tool:\n{result}")
+            # print("\n\nExecuting 'youtube_transcript' tool with parameters https://www.youtube.com/watch?v=DAYJZLERqe8")
+            # result = await self.call_tool("youtube_transcript", {"url":"https://www.youtube.com/watch?v=DAYJZLERqe8"})
+            # raw_path = Path(__file__).parents[3].resolve() / "youtube_text_output.raw"
+            # # Now we can write it out to a file.
+            # with open(raw_path, 'w', encoding='utf-8') as raw_file:
+            #     raw_file.write(str(result))
+            #     # logger.info(f"💾 Saved transcript to {txt_path}")
+            # print(f"Result of youtube_transcript tool in {raw_path}")
+            # # print(f"Result of youtube_transcript tool:\n{result}")
 
 
 
 
             print("\n\nExecuting 'youtube_json' tool with parameters https://www.youtube.com/watch?v=DAYJZLERqe8")
             result = await self.call_tool("youtube_json", {"url":"https://www.youtube.com/watch?v=DAYJZLERqe8"})
-            # text = self.extract_text_values_any(result)
-            json_path = Path(__file__).parents[3].resolve() / "youtube_text_output.json"
-
+            json_path = Path(__file__).parents[3].resolve() / "outputs" / "youtube_text_output.json"
             # Now we can write it out to a file.
             with open(json_path, 'w', encoding='utf-8') as json_file:
                 json_file.write(str(result))
@@ -194,9 +190,7 @@ class universal_client(Client):
 
             print("\n\nExecuting 'youtube_text' tool with parameters https://www.youtube.com/watch?v=DAYJZLERqe8")
             result = await self.call_tool("youtube_text", {"url":"https://www.youtube.com/watch?v=DAYJZLERqe8"})
-            # text = self.extract_text_values_any(result)
-            txt_path = Path(__file__).parents[3].resolve() / "youtube_text_output.txt"
-
+            txt_path = Path(__file__).parents[3].resolve() / "outputs" / "youtube_text_output.txt"
             # Now we can write it out to a file.
             with open(txt_path, 'w', encoding='utf-8') as txt_file:
                 txt_file.write(str(result))
