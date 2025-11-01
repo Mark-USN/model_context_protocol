@@ -18,6 +18,9 @@ from ..utils.get_icons import get_icon
 
 from fastmcp import FastMCP
 
+
+# TODO: 20251101 MMH Add resource_loader.py and resource_template_loader.py
+
 logging.basicConfig(
     # level=logging.DEBUG if settings.debug else logging.INFO,
     level=logging.INFO,

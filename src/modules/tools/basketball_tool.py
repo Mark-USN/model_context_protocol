@@ -6,7 +6,6 @@ Simulates retrieving player and team statistics.
 
 import logging
 from typing import Any, Dict, List, TypeVar
-from regex import T
 from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
@@ -41,7 +40,7 @@ def get_team_stats(team_name: str) -> Dict[str, Any]:
 def register(mcp: T):
     """Register basketball tools with MCPServer."""
     logger.info("Registering basketball tools")
-    mcp.tool(tags=["public"])(get_team_stats)
+    mcp.tool(tags=["public", "api"])(get_team_stats)
 
 
 # -----------------------

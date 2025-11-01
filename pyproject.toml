@@ -1,38 +1,10 @@
-[build-system]
-requires = ["hatchling>=1.18"]
-build-backend = "hatchling.build"
-
 [project]
 name = "model-context-protocol"
 version = "0.1.0"
-description = "MCP clients and servers as separate top-level packages."
+description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp>=2.12.4",
-    "python-frontmatter>=1.1.0",
-    "pywin32>=311",
-]
-# Add real deps as needed, e.g.:
-# dependencies = ["fastmcp>=2.0"]
-
-# Optional: handy console scripts (requires each target to expose a `main()`).
-[project.scripts]
-mcp-client = "mcp_clients.universal_client:main"
-mcp-server = "mcp_servers.demo_server:main"
-
-# Wheel build: include just the two packages living under src/
-[tool.hatch.build.targets.wheel]
-packages = [
-  "src/modules/mcp_clients",
-  "src/modules/mcp_servers",
-]
-
-# (Nice-to-have) Keep non-package folders like tools/ out of the source dist
-[tool.hatch.build]
-exclude = [
-#  "src/**",
-  ".vscode/**",
-  ".idea/**",
-  "tests/**",
+    "fastmcp>=2.13.0.2",
+    "youtube-transcript-api>=1.2.3",
 ]
