@@ -33,9 +33,9 @@ TestResults/
 Thumbs.db
 uv.lock
 stuff/
+outputs/
 mcp.pid
 mcp.log
-youtube_text_output.*
 *.sln
 *.pyproj
 *.pyproj.user
