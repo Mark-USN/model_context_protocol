@@ -1,7 +1,7 @@
 # infra/tool_loader.py
 """
 Dynamic discovery and registration of MCP tools.
-This loader automatically scans a package for *_tool modules,
+This loader automatically scans a package for modules (.py files),
 imports them safely, and registers them into an MCP server.
 """
 
@@ -19,12 +19,18 @@ from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
 
+# -----------------------------
+# Logging setup
+# -----------------------------
+logging.basicConfig(
+    # level=logging.DEBUG if settings.debug else logging.INFO,
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger(f"{Path(__file__).stem}")
 
 _REL_PATH = Path(__file__).parents[1].resolve()
-
-
-
 
 def load_module_from_path(
     path: str | Path,
@@ -57,6 +63,7 @@ def load_module_from_path(
         raise FileNotFoundError(p)
 
     def _name_from_root(pp: Path, root: Path) -> str:
+        """ Derive a dotted module name for `pp` relative to `root`. """
         rel = pp.relative_to(root)
         parts = list(rel.parts)
         if pp.is_file() and pp.suffix == ".py":
@@ -105,7 +112,6 @@ def load_module_from_path(
 def discover_tools(package: str = ".tools") -> List[ModuleType]:
     """
     Discover all *_tool modules inside the given package.
-
     Args:
         package (str): Python package path containing the tool modules.
 

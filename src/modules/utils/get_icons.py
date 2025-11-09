@@ -1,4 +1,18 @@
-﻿# ---- Emoji / Icon options ----
+﻿# PSEUDOCODE / PLAN (detailed):
+#  - Provide a small ICONS mapping that exposes common "charters" (emoji/icons) by name.
+#    - Include common options: check marks, ballot box with check, red square, stop sign, cross mark, info.
+#    - Document codepoints and short description in comments so a developer can pick one.
+#  - Add a helper function get_icon(name, fallback="") to return the chosen icon.
+#  - Replace hard-coded emoji strings in logger messages with calls to get_icon(...)
+#  - Keep behavior unchanged otherwise; ensure PID-file missing logic does not reference undefined variables.
+#  - Keep file readable and self-contained; don't introduce external dependencies.
+#
+# USAGE:
+#  - Use get_icon("check"), get_icon("ballot"), get_icon("red_box"), get_icon("stop"), get_icon("cross"), get_icon("info")
+#  - Or directly index ICONS["check"]
+#
+
+# ---- Emoji / Icon options ----
 # A small set of handy icons you can use in log messages.
 # Common options (name: glyph — Unicode codepoint / description):
 #   check         : ✅  (U+2705) - White Heavy Check Mark (green rounded box in many renderers)

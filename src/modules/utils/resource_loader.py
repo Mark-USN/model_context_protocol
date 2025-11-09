@@ -7,6 +7,7 @@ imports them safely, and registers them into an MCP server.
 
 import importlib
 import pkgutil
+import json
 import logging
 from types import ModuleType
 from pathlib import Path
@@ -16,10 +17,18 @@ from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
 
+# -----------------------------
+# Logging setup
+# -----------------------------
+logging.basicConfig(
+    # level=logging.DEBUG if settings.debug else logging.INFO,
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(Path(__file__).stem)
 
 full_path = Path(__file__)
-logger = logging.getLogger(f"{full_path.stem}")
-
 
 default_resource_path = full_path.parent.parent / "resources"
 
@@ -129,6 +138,11 @@ def register_resource_in_module(mcp: Any, module: ModuleType) -> None:
 
 
 def load_resources_from_dir(dir_path: Path) -> None:
+    """
+        Load resource metadata from JSON files in the specified directory.
+        Args:
+            dir_path (Path): Path to the directory containing resource JSON files.
+    """
     if not dir_path.exists():
         return
     for p in dir_path.rglob("*.json"):
