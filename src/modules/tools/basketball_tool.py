@@ -10,7 +10,17 @@ from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
 
-logger = logging.getLogger("tools.basketball_tool")
+# -----------------------------
+# Logging setup
+# -----------------------------
+logging.basicConfig(
+    # level=logging.DEBUG if settings.debug else logging.INFO,
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(Path(__file__).stem)
+
 
 
 # -----------------------

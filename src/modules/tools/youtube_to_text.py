@@ -49,6 +49,9 @@ FORCE_AUDIO_TRANSCRIPT = False
 
 # ----------------- Helpers -----------------
 def get_video_id(url: str) -> str:
+    """Extract the YouTube video ID from a URL.
+        Args: url: The YouTube video URL.
+    """
     url = url.strip()
     if not url:
         raise ValueError("Empty URL")
@@ -69,7 +72,8 @@ def get_video_id(url: str) -> str:
 
 def fetch_transcript(url:str, prefer_langs: Optional[List[str]] = None) -> FetchedTranscript | Dict | None:
     """ 
-    Return the transcript for the YouTube video with the given ID.
+    Return the transcript for the YouTube video with the given ID if the transcript
+    is not available, download the audio and use Whisper to transcribe it.
         Params: url, prefer_lang,
         Return: youtube transcript or None
     """
@@ -118,33 +122,38 @@ def _get_outputs_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "outputs"
 
 def _get_transcripts_dir() -> Path:
+    """Folder for transcript outputs. """
     out_dir = _get_outputs_dir() / "transcripts"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
 def _get_audio_dir() -> Path:
+    """Folder for temporary storage of yt_dlp audio outputs. 
+            We delete these if they are over a day old in the code below.
+    """
+
     out_dir = _get_outputs_dir() / "audio"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
 
-def save_txt_and_json_from_transcript(transcript: list[dict], video_id: str) -> tuple[Path, Path]:
-    out_dir = _get_transcripts_dir()
-    txt_path = out_dir / f"transcript_{video_id}.txt"
-    json_path = out_dir / f"transcript_{video_id}.json"
-    trans_text = ""
+# def save_txt_and_json_from_transcript(transcript: list[dict], video_id: str) -> tuple[Path, Path]:
+#     out_dir = _get_transcripts_dir()
+#     txt_path = out_dir / f"transcript_{video_id}.txt"
+#     json_path = out_dir / f"transcript_{video_id}.json"
+#     trans_text = ""
 
-    if transcript == None or len(transcript) == 0:
-        return None
+#     if transcript == None or len(transcript) == 0:
+#         return None
 
-    for snippet in transcript:
-        trans_text += snippet["text"] + " "   
+#     for snippet in transcript:
+#         trans_text += snippet["text"] + " "   
 
-    txt_path.write_text(f"{trans_text}", encoding="utf-8")
-    json_path.write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
+#     txt_path.write_text(f"{trans_text}", encoding="utf-8")
+#     json_path.write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    logger.info("💾 Saved transcript to %s and %s", txt_path, json_path)
-    return txt_path, json_path
+#     logger.info("💾 Saved transcript to %s and %s", txt_path, json_path)
+#     return txt_path, json_path
 
 
 # ----------------- Audio + Whisper -----------------
@@ -179,16 +188,24 @@ def download_audio(url: str, video_id: str, audio_format: str = "mp3") -> Path:
     
     # Clean up old audio files (older than 24 hours) in the audio directory.
     cutoff = time.time() - (24 * 3600)
-    for file in audio_dir.iterdir():
-        if file.is_file():
-            if file.stat().st_mtime < cutoff:
-                file.unlink()
+    for f in audio_dir.iterdir():
+        try:
+            if f.is_file():
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+        except Exception as e:
+            logger.debug(f"Could not delete temporary audio file: {e}")
+            continue
 
     return audio_path
 
 
 def transcribe_with_whisper(audio_path: Path, model_name: str = "base") -> Optional[Dict]:
-    """Transcribe an audio file using OpenAI Whisper."""
+    """Transcribe an audio file using OpenAI Whisper.
+        Args:
+            audio_path: Path to the audio file.
+            model_name: Whisper model name to use (default: "base").
+    """
     model = whisper.load_model(model_name)
     # loaded_audio = whisper.load_audio(str(audio_path))
     # whisper_audio = whisper.pad_or_trim(loaded_audio)
@@ -209,15 +226,18 @@ def transcribe_with_whisper(audio_path: Path, model_name: str = "base") -> Optio
 
 
 def fetch_transcript_from_audio(url: str, video_id: str, audio_format: str = "mp3") -> Optional[Dict]:
+    """ Download audio from YouTube and transcribe it with Whisper.
+        Args:
+            url: The YouTube video URL.
+            video_id: The YouTube video ID.
+            audio_format: The audio format to download (default: "mp3").
+        Returns:
+            The transcript as a dictionary, or None if transcription failed.-
+    """
     logger.warning("⚠️ No subtitles. Downloading audio and transcribing with Whisper...")
 
     audio_path = download_audio(url, video_id, audio_format)
     transcript = transcribe_with_whisper(audio_path, model_name="base")
-    # try:
-    #     audio_path.unlink(missing_ok=True)
-    # except Exception as e:
-    #     logger.debug("Could not delete temporary audio file: %s", e)
-    # save_txt_and_json_from_text(text, video_id)
     return transcript
 
 
@@ -256,10 +276,13 @@ def youtube_text(url: str, prefer_lang: List[str] =  ["en", "es"]) -> str:
     if transcript == None:
         return None
     if isinstance(transcript, FetchedTranscript):
+        # Convert to raw data (list of dicts)
         transcript_list = transcript.to_raw_data()
+        # Combine all text snippets into a single string.
         for snippet in transcript_list:
             transcribed_text += snippet["text"] + " "
     else:
+        # Audio has a dict entry with "text" key that has the full text.
         transcribed_text = transcript.get("text", "")
   
     return transcribed_text.strip()
@@ -281,6 +304,8 @@ def register(mcp: T):
 
 # ----------------- CLI -----------------
 if __name__ == "__main__":
+    """ CLI for testing the YouTube to text tool. """
+    # Change this to url = "" to prompt for input.
     url = "https://www.youtube.com/watch?v=DAYJZLERqe8"
     while not url:
         url = input("Enter YouTube URL: ").strip()

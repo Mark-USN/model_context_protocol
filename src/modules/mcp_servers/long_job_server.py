@@ -1,18 +1,43 @@
 
 import os
+import sys
 import hmac
 import json
 import time
 import uuid
 import base64
 import asyncio
+import logging
+import argparse
+import importlib
+import pkgutil
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, Tuple ,Optional, TypeVar, cast
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, Callable, TypeVar, cast
+from ..utils.prompt_md_loader import register_prompts_from_markdown
+from ..utils.prompt_loader import register_prompts
+from ..utils.tool_loader import register_tools
+from ..utils.get_icons import get_icon
 
 from fastmcp import FastMCP
 
 mcp = FastMCP(name="MCP-HMAC-LongJobs")
+
+
+# -----------------------------
+# Logging setup
+# -----------------------------
+logging.basicConfig(
+    # level=logging.DEBUG if settings.debug else logging.INFO,
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(Path(__file__).stem)
+
+
+
 
 # =============================================================================
 # 1) HMAC session tokens
