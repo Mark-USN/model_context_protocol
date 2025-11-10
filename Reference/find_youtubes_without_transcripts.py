@@ -137,9 +137,9 @@ def search_query(q: str, max_results_per_query: int, date_sort: bool, verbose: b
     mode = "ytsearchdate" if date_sort else "ytsearch"
     query_expr = f"{mode}{max_results_per_query}:{q}"
     ydl_opts = {
-        "verbose": True if verbose else False       # Print additional info to stdout.
-        "quiet": False if verbose else True         # Do not print messages to stdout.
-        "no_warnings": True if verbose else False   # Do not print out anything for warnings.
+        "verbose": True if verbose else False,       # Print additional info to stdout.
+        "quiet": False if verbose else True,         # Do not print messages to stdout.
+        "no_warnings": True if verbose else False,   # Do not print out anything for warnings.
         "skip_download": True,
         "extract_flat": True,
     }
