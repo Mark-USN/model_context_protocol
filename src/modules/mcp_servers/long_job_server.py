@@ -1,6 +1,6 @@
-
+﻿""" MCP module: HMAC-authenticated long-running jobs with session isolation."""
 import os
-import sys
+# import sys
 import hmac
 import json
 import time
@@ -9,20 +9,19 @@ import base64
 import asyncio
 import logging
 import argparse
-import importlib
-import pkgutil
+# import importlib
+# import pkgutil
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Tuple ,Optional, TypeVar, cast
+from typing import Any, Callable, Dict,Optional, TypeVar, cast
 from dataclasses import dataclass, field
 from enum import Enum
+from fastmcp import FastMCP
 from ..utils.prompt_md_loader import register_prompts_from_markdown
 from ..utils.prompt_loader import register_prompts
 from ..utils.tool_loader import register_tools
-from ..utils.get_icons import get_icon
 
-from fastmcp import FastMCP
 
-mcp = FastMCP(name="MCP-HMAC-LongJobs")
+# mcp = FastMCP(name="MCP-HMAC-LongJobs")
 
 
 # -----------------------------
@@ -36,6 +35,57 @@ logging.basicConfig(
 )
 logger = logging.getLogger(Path(__file__).stem)
 
+
+# -----------------------------
+# Paths to tool, prompt, resource packages
+# -----------------------------
+_MODULES_DIR = Path(__file__).parents[1].resolve()
+_TOOLS_DIR = _MODULES_DIR / "tools"
+_PROMPTS_DIR = _MODULES_DIR / "prompts"
+_RESOURCES_DIR = _MODULES_DIR / "resources"
+
+
+# -----------------------------
+# From demo_server.py: Paths to tool, prompt, resource packages
+# -----------------------------
+
+mcp = FastMCP(
+    name="DemoServer",
+    include_tags={"public", "api"},
+    exclude_tags={"internal", "deprecated"},
+    on_duplicate_tools="error",
+    on_duplicate_resources="warn",
+    on_duplicate_prompts="replace",
+    # strict_input_validation=False,
+    include_fastmcp_meta=False,
+)
+
+# -----------------------------------------
+# Attach everything to FastMCP at startup
+# -----------------------------------------
+def attach_everything():
+    """ 20251101 MMH attach_everything registers all tools and prompts to the FastMCP server.
+        Warning: The server will pull in all the code from a tool or prompt package.
+        Any error in a file will cause the tools or prompts in that package to be ignored.
+        Make sure you trust the code in those packages!
+    """
+    register_tools(mcp, package=_TOOLS_DIR)
+    logger.info("✅	 Tools registered.")
+
+    register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
+    logger.info("✅	 Markdown files parsed and prompts registered.")
+
+    register_prompts(mcp, package=_PROMPTS_DIR)
+    logger.info("✅	 Prompt functions registered.")
+
+def launch_server(host:str="127.0.0.1", port:int=8085):
+    """ 20251101 MMH launch_server
+        The entry point to start the FastMCP server. 
+        Launch the FastMCP server with all tools and prompts attached. 
+    """
+    attach_everything()
+    mcp.run(transport="http", host=host, port=port)
+    logger.info("✅	 Server started on http://{host}:{port}")
 
 
 
@@ -79,7 +129,7 @@ def _verify(token: str) -> dict:
             raise ValueError("signature mismatch")
         payload = json.loads(_unb64url(p_b64))
     except Exception as e:
-        raise ValueError(f"invalid token: {e}")
+        raise ValueError(f"invalid token: {e}") from e
 
     now = int(time.time())
     if "exp" in payload and now > int(payload["exp"]):
@@ -90,7 +140,8 @@ def _verify(token: str) -> dict:
 
 # Issue a session token (short-lived, opaque, HMAC-signed)
 @mcp.tool
-def get_session_token(client_hint: str | None = None, ttl_seconds: int = TOKEN_TTL_SECONDS) -> dict:
+def get_session_token(client_hint: str | None = None,
+                      ttl_seconds: int = TOKEN_TTL_SECONDS) -> dict:
     """
     Returns a short-lived signed token with a unique session_id.
     Clients should present this 'token' to protected tools.
@@ -102,8 +153,8 @@ def get_session_token(client_hint: str | None = None, ttl_seconds: int = TOKEN_T
         "iat": now,
         "nbf": now,
         "exp": now + int(ttl_seconds),
-        # optional: "scope": ["long_jobs","protected_tools"]
-        # optional: "client_hint": client_hint,
+        "scope": ["long_jobs","protected_tools"],
+        "client_hint": client_hint,
     }
     return {"token": _sign(payload), "sid": session_id, "expires_in": ttl_seconds}
 
@@ -142,14 +193,15 @@ def requires_token(fn: F) -> F:
     # preserve sync/async behavior
     if asyncio.iscoroutinefunction(fn):
         return cast(F, _async_wrapper)
-    else:
-        return cast(F, _sync_wrapper)
+
+    return cast(F, _sync_wrapper)
 
 # =============================================================================
 # 2) Long-job infrastructure (per-session isolation)
 # =============================================================================
 
 class JobState(str, Enum):
+    """ Possible states for a long-running job. """
     PENDING = "pending"
     RUNNING = "running"
     DONE = "done"
@@ -159,6 +211,7 @@ class JobState(str, Enum):
 
 @dataclass
 class Job:
+    """ Represents a long-running job. """
     job_id: str
     session_id: str
     created_at: float = field(default_factory=time.time)
@@ -169,7 +222,7 @@ class Job:
     result: Optional[Any] = None
     error: Optional[str] = None
     timeout_s: Optional[float] = 300.0
-    _task: Optional[asyncio.Task] = None
+    task: Optional[asyncio.Task] = None
 
 # Jobs are namespaced by session_id
 # key: (session_id, job_id)
@@ -206,7 +259,7 @@ async def _run_with_timeout(job: Job, coro: asyncio.coroutines):
         job.error = "canceled"
         job.finished_at = time.time()
         raise
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         job.state = JobState.FAILED
         job.error = f"{type(e).__name__}: {e}"
         job.finished_at = time.time()
@@ -217,19 +270,28 @@ async def _run_with_timeout(job: Job, coro: asyncio.coroutines):
 
 @mcp.tool
 @requires_token
-async def start_long_job(payload: str, token: str, timeout_s: float | None = 300.0, *, session_id: str) -> dict:
+async def start_long_job(payload: str, token: str, timeout_s: float | None = 300.0,
+                         *, session_id: str) -> dict:
     """
     Start a background job bound to this session_id. Returns job_id.
     """
     job_id = str(uuid.uuid4())
     job = Job(job_id=job_id, session_id=session_id, timeout_s=timeout_s)
     _JOBS[_jk(session_id, job_id)] = job
-    job._task = asyncio.create_task(_run_with_timeout(job, _simulate_work(job, payload)))
+    job.task = asyncio.create_task(_run_with_timeout(job, _simulate_work(job, payload)))
     return {"job_id": job_id, "state": job.state, "progress": job.progress}
 
 @mcp.tool
 @requires_token
 def get_job_status(job_id: str, token: str, *, session_id: str) -> dict:
+    """ Get status of a job for this session_id. 
+            Args: 
+                job_id (str): The ID of the job to query.
+                token (str): The HMAC session token.
+                session_id (str): Injected session ID from token.
+            Returns:
+                dict: A dictionary with job status information.
+    """
     job = _JOBS.get(_jk(session_id, job_id))
     if not job:
         return {"error": "no such job for this session"}
@@ -247,6 +309,14 @@ def get_job_status(job_id: str, token: str, *, session_id: str) -> dict:
 @mcp.tool
 @requires_token
 def get_job_result(job_id: str, token: str, *, session_id: str) -> dict:
+    """ Get result of a completed job for this session_id.
+            Args:
+                job_id (str): The ID of the job to get the result for.
+                token (str): The HMAC session token.
+                session_id (str): Injected session ID from token.
+            Returns:
+                dict: A dictionary with the job result or an error message.
+    """
     job = _JOBS.get(_jk(session_id, job_id))
     if not job:
         return {"error": "no such job for this session"}
@@ -257,16 +327,24 @@ def get_job_result(job_id: str, token: str, *, session_id: str) -> dict:
 @mcp.tool
 @requires_token
 async def cancel_job(job_id: str, token: str, *, session_id: str) -> dict:
+    """ Cancel a running job for this session_id.
+            Args:
+                job_id (str): The ID of the job to cancel.
+                token (str): The HMAC session token.
+                session_id (str): Injected session ID from token.
+            Returns:
+                dict: A dictionary indicating success or failure of cancellation.
+"""
     job = _JOBS.get(_jk(session_id, job_id))
     if not job:
         return {"error": "no such job for this session"}
     if job.state in {JobState.DONE, JobState.FAILED, JobState.CANCELED, JobState.TIMED_OUT}:
         return {"ok": False, "info": f"already finished (state={job.state})"}
-    if job._task and not job._task.done():
+    if job.task and not job.task.done():
         job.state = JobState.CANCELED
-        job._task.cancel()
+        job.task.cancel()
         try:
-            await job._task
+            await job.task
         except asyncio.CancelledError:
             pass
         return {"ok": True, "state": job.state}
@@ -279,12 +357,25 @@ async def cancel_job(job_id: str, token: str, *, session_id: str) -> dict:
 # A) PUBLIC short tool (no token required)
 @mcp.tool
 def echo(text: str) -> str:
+    """ Simple echo tool (no auth required).
+            Args:
+                text (str): The text to echo back.
+            Returns:
+                str: The echoed text.
+    """
     return text
 
-# B) PROTECTED short tool (requires token) � e.g., reads user-owned server data
+# B) PROTECTED short tool (requires token) — e.g., reads user-owned server data
 @mcp.tool
 @requires_token
 def list_my_jobs(token: str, *, session_id: str) -> dict:
+    """ List all jobs for this session_id.
+            Args:
+                token (str): The HMAC session token.
+                session_id (str): Injected session ID from token.
+            Returns:
+                dict: A dictionary with count and list of jobs.
+    """
     mine = [
         {
             "job_id": jid,
@@ -299,5 +390,35 @@ def list_my_jobs(token: str, *, session_id: str) -> dict:
 
 # =============================================================================
 
+def port_type(value: str) -> int:
+    """ 20251101 MMH port_type
+        Custom argparse type that validates a TCP port number.
+    """
+    try:
+        port = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Port must be an integer (got {value!r})") from e
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"Port number must be between 1 and 65535 (got {port})")
+    return port
+
+
+
+def main():
+    """ 20251101 MMH main
+        Main entry point when launched "stand alone" 
+        Parse arguments and start the server. 
+    """
+    parser = argparse.ArgumentParser(description="Create and run an MCP server.")
+    parser.add_argument("--host", type=str, default="127.0.0.1",
+                        help="Host name or IP address (default 127.0.0.1).")
+    parser.add_argument("--port", type=port_type, default=8085,
+                        help="TCP port to bind/connect (default 8085).")
+    args = parser.parse_args()
+
+    launch_server(args.host, args.port)
+
 if __name__ == "__main__":
-    mcp.run()
+    main()
+# if __name__ == "__main__":
+#     mcp.run()

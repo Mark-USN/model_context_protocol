@@ -32,10 +32,13 @@ TestResults/
 .DS_Store
 Thumbs.db
 uv.lock
-stuff/
+src/Reference/
 outputs/
 mcp.pid
 mcp.log
 *.sln
 *.pyproj
 *.pyproj.user
+UnicodeTable.md
+.env
+ffmpegLocation.txt

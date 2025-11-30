@@ -5,7 +5,6 @@ This loader automatically scans a package for modules (.py files),
 imports them safely, and registers them into an MCP server.
 """
 
-from math import e
 import sys
 import importlib
 import importlib.util
@@ -13,7 +12,7 @@ import pkgutil
 import logging
 import hashlib
 from types import ModuleType
-from typing import Any, List, Optional, TypeVar
+from typing import List, TypeVar
 from pathlib import Path
 from fastmcp import FastMCP
 
@@ -30,7 +29,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(f"{Path(__file__).stem}")
 
-_REL_PATH = Path(__file__).parents[1].resolve()
+# _REL_PATH = Path(__file__).parents[1].resolve()
+# modules/utils/tool_loader.py
+_REL_PATH = Path(__file__).parents[2].resolve()
+# parents[2] = .../ (the folder that has 'modules' in it)
 
 def load_module_from_path(
     path: str | Path,
@@ -105,8 +107,8 @@ def load_module_from_path(
             sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
             return mod, module_name
-        else:
-            raise ImportError(f"Unsupported path type: {p}")
+
+        raise ImportError(f"Unsupported path type: {p}")
 
 
 def discover_tools(package: str = ".tools") -> List[ModuleType]:
@@ -128,7 +130,7 @@ def discover_tools(package: str = ".tools") -> List[ModuleType]:
 
     for _, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
         # TODO: MCP does not handle submodules. Need to add code to recurse
-        # into subpackages and 'flatten' them into the main package namespace. 
+        # into subpackages and 'flatten' them into the main package namespace.
         if ispkg :
             continue
 
@@ -137,8 +139,9 @@ def discover_tools(package: str = ".tools") -> List[ModuleType]:
             module = importlib.import_module(full_name)
             modules.append(module)
             logger.info("✅ Loaded tool module: %s", full_name)
-        except Exception as e:
+        except Exception as e:      # pylint: disable=broad-exception-caught
             logger.exception("❌ Error importing module %s: %s", full_name, e)
+            continue
 
     return modules
 
@@ -157,11 +160,16 @@ def register_tools(mcp: T, package: Path | str = "../tools") -> None:
         tools_pkg = Path(package)
 
     if not tools_pkg.exists() or not tools_pkg.is_dir():
-        logger.exception(f"❌ Prompts directory {tools_pkg} does not exist or is not a directory.")
+        logger.exception("❌ Prompts directory %s does not exist or is not a directory.", tools_pkg)
         return
 
-    mod, module_name = load_module_from_path(path=tools_pkg, sys_path_root=_REL_PATH,
-                          module_name="tools", add_sys_path=True)
+    # _, module_name = load_module_from_path(path=tools_pkg, sys_path_root=_REL_PATH,
+    #                       module_name="tools", add_sys_path=True)
+    _, module_name = load_module_from_path(
+        path=tools_pkg,
+        sys_path_root=_REL_PATH,  # project root
+        add_sys_path=True,        # let the loader derive the dotted name
+    )
 
     modules = discover_tools(module_name)
     if not modules:
@@ -183,8 +191,5 @@ def register_tools_in_module(mcp: T, module: ModuleType) -> None:
         logger.warning("⚠️ Module %s has no register(mcp) function", module.__name__)
         return
 
-    try:
-        module.register(mcp)
-        logger.info("🔧 Registered tools from %s", module.__name__)
-    except Exception as e:
-        logger.exception("❌ Failed to register tools from %s: %s", module.__name__, e)
+    module.register(mcp)
+    logger.info("🔧 Registered tools from %s", module.__name__)
