@@ -42,3 +42,5 @@ mcp.log
 UnicodeTable.md
 .env
 ffmpegLocation.txt
+.bin/
+License/

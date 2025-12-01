@@ -32,6 +32,7 @@ class UniversalClient(Client):
     """
     # Variable to hold YouTube URL
     yt_url: str = ""
+    yt_search: str = ""
 
     def __init__(self, host: str, port: int):
         """ 20251003 MMH universal_client __init__
@@ -70,7 +71,7 @@ class UniversalClient(Client):
             # Basic server interaction
             await self.ping()
 
-            # List available operations
+            # List available tools, resources, templates, and prompts
             tools = await self.list_tools()
             self._show_tools(tools)
 
@@ -83,10 +84,10 @@ class UniversalClient(Client):
             prompts = await self.list_prompts()
             self._show_prompts(prompts)
 
-            # Execute example operations
+            # Execute example tools
             await self._run_example_tools(tools)
 
-            # Execute example operations
+            # Execute example prompts
             await self._run_example_prompts(prompts)
 
 # ---------------------------------------------------------------------
@@ -192,12 +193,17 @@ class UniversalClient(Client):
 
     async def _run_youtube_demo(self) -> None:
         """Demonstrate YouTube-related tools."""
-        # Ask user for URL once
-        while not self.yt_url:
-            self.yt_url = input("Enter YouTube URL: ").strip()
-            if not self.yt_url:
+        # Ask user for Search Term once
+
+
+        # self.yt_search = "Python programming tutorials"
+
+
+        while not self.yt_search:
+            self.yt_search = input("Enter Search for YouTube: ").strip()
+            if not self.yt_search:
                 logger.warning(
-                    "⚠️ Please paste a valid YouTube URL.",
+                    "⚠️ Please enter a valid search term.",
                 )
 
         base_out_dir = (
@@ -207,6 +213,22 @@ class UniversalClient(Client):
             / "outputs"
         )
         base_out_dir.mkdir(parents=True, exist_ok=True)
+        
+        # youtube_search
+        print(
+            "\n\nExecuting 'get_most_relevant_video_url' tool "
+            f"with parameters {self.yt_search}",
+        )
+        yt_url_result = await self.call_tool(
+            "get_most_relevant_video_url",
+            {"query": self.yt_search},
+        )
+
+        # print(f"yt_url_result.data: \n{yt_url_result.data}\n")
+
+        # When working with LLMs result.content might be preferred.
+        self.yt_url = yt_url_result.data
+        print(f"Most relevant YouTube URL: {self.yt_url}")
 
         # youtube_json
         print(
@@ -220,7 +242,7 @@ class UniversalClient(Client):
         video_id = self.get_video_id(self.yt_url)
         json_path = base_out_dir / f"{video_id}.json"
         with open(json_path, "w", encoding="utf-8") as json_file:
-            json_file.write(str(json_result))
+            json_file.write(str(json_result.data))
         print(f"Result of youtube_json tool in {json_path}")
 
         # youtube_text
@@ -234,7 +256,7 @@ class UniversalClient(Client):
         )
         txt_path = base_out_dir / f"{video_id}.txt"
         with open(txt_path, "w", encoding="utf-8") as txt_file:
-            txt_file.write(str(text_result))
+            txt_file.write(str(text_result.data))
         print(f"Result of youtube_text tool in {txt_path}")
 
 # ---------------------------------------------------------------------

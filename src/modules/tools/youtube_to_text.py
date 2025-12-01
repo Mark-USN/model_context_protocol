@@ -8,8 +8,6 @@ import logging
 import time
 from pathlib import Path
 from typing import List, Dict, Optional, TypeVar
-
-import numpy as np
 import whisper
 from yt_dlp import YoutubeDL
 from youtube_transcript_api import (
@@ -36,7 +34,7 @@ logger = logging.getLogger(Path(__file__).stem)
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
 
 # Set to True to force using Whisper even if subtitles are available.
-FORCE_AUDIO_TRANSCRIPT = False
+FORCE_AUDIO_TRANSCRIPT = True
 
 # ----------------- Whisper chunking configuration -----------------
 # Duration (in seconds) for each Whisper chunk
@@ -99,7 +97,7 @@ def fetch_transcript(
                 )
                 logger.info("✅ Using transcript in preferred language: %s", lang)
                 break
-            except NoTranscriptFound | TranscriptsDisabled:
+            except (NoTranscriptFound, TranscriptsDisabled):
                 continue
 
         # 2) Fallback: take the *first* available Transcript and try to
@@ -435,7 +433,8 @@ def register(mcp: T) -> None:
 
 if __name__ == "__main__":
     # CLI for testing the YouTube to text tool.
-    yt_url = "https://www.youtube.com/watch?v=DAYJZLERqe8"
+    # yt_url = "https://www.youtube.com/watch?v=DAYJZLERqe8"
+    yt_url = "https://www.youtube.com/watch?v=_uQrJ0TkZlc"
     while not yt_url:
         yt_url = input("Enter YouTube URL: ").strip()
         if not yt_url:
@@ -448,11 +447,16 @@ if __name__ == "__main__":
             "FFmpeg and ensure it is on the system PATH."
         )
     logger.info("✅ Using ffmpeg at %s", get_ffmpeg_binary_path())
-
+    start = time.perf_counter()
     json_trans = youtube_json(yt_url)
+    end = time.perf_counter()
+    logger.info("✅ Transcribed in %.6f seconds.", end - start)
     print("\n\n--- JSON TRANSCRIPT ---\n")
     print(f"{json_trans}")
 
+    start = time.perf_counter()
     text_trans = youtube_text(yt_url)
+    end = time.perf_counter()
+    logger.info("✅ Transcribed in %.6f seconds.", end - start)
     print("\n\n--- TEXT TRANSCRIPT ---\n")
     print(f"{text_trans}")
