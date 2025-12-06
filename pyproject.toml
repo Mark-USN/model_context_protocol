@@ -3,13 +3,31 @@ name = "model-context-protocol"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+# Optional but recommended: cap at <3.13 so uv doesn't try to solve for 3.13+
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastmcp>=2.13.0.2",
     "google-api-python-client>=2.187.0",
     "openai-whisper>=20250625",
     "pylint>=4.0.2",
     "python-frontmatter>=1.1.0",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
     "youtube-transcript-api>=1.2.3",
     "yt-dlp>=2025.10.22",
+]
+
+# Tell uv about the PyTorch CUDA 12.8 index
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# Tell uv that torch / torchvision should come from that index
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128" },
+]
+torchvision = [
+    { index = "pytorch-cu128" },
 ]

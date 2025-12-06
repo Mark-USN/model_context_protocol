@@ -97,6 +97,14 @@ def start_server(host: str, port: int, debug: bool):
     else:
         kwargs["preexec_fn"] = os.setpgrp  # pylint: disable=no-member
         kwargs["close_fds"] = True
+    
+    # 20251204 MMH: Ensure log file and pid file exist
+    if not LOG_FILE.parent.exists():
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LOG_FILE.touch(exist_ok=True)
+    if not PID_FILE.parent.exists():
+        PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PID_FILE.touch(exist_ok=True)
 
     # Use `with` for the log file only; the server keeps running after this
     # script exits.

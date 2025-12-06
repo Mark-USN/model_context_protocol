@@ -23,6 +23,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(Path(__file__).stem)
 
+# ---------------------------------------------------------------------
+# Control which examples to run
+RUN_TOOL_EXAMPLES = True
+RUN_PROMPT_EXAMPLES = False
+# ---------------------------------------------------------------------
 
 class UniversalClient(Client):
     """ 20251003 MMH universal_client class
@@ -84,11 +89,13 @@ class UniversalClient(Client):
             prompts = await self.list_prompts()
             self._show_prompts(prompts)
 
-            # Execute example tools
-            await self._run_example_tools(tools)
+            if RUN_TOOL_EXAMPLES:
+                # Execute example tools
+                await self._run_example_tools(tools)
 
-            # Execute example prompts
-            await self._run_example_prompts(prompts)
+            if RUN_PROMPT_EXAMPLES:
+                # Execute example prompts
+                await self._run_example_prompts(prompts)
 
 # ---------------------------------------------------------------------
 #
@@ -193,14 +200,20 @@ class UniversalClient(Client):
 
     async def _run_youtube_demo(self) -> None:
         """Demonstrate YouTube-related tools."""
+        import fastmcp, torch
+        import time
+        from datetime import timedelta
+        print("\nfastmcp:", fastmcp.__version__)
+        print("torch:", torch.__version__)
+        print("CUDA available:", torch.cuda.is_available())
+        print("Device count:", torch.cuda.device_count())
+        print("\n")
+        
         # Ask user for Search Term once
-
-
         # self.yt_search = "Python programming tutorials"
 
-
         while not self.yt_search:
-            self.yt_search = input("Enter Search for YouTube: ").strip()
+            self.yt_search = input("\033[1mEnter Search for YouTube: \033[0m").strip()
             if not self.yt_search:
                 logger.warning(
                     "⚠️ Please enter a valid search term.",
@@ -228,37 +241,44 @@ class UniversalClient(Client):
 
         # When working with LLMs result.content might be preferred.
         self.yt_url = yt_url_result.data
-        print(f"Most relevant YouTube URL: {self.yt_url}")
+        print(f"\nMost relevant YouTube URL: {self.yt_url}")
 
         # youtube_json
         print(
             "\n\nExecuting 'youtube_json' tool "
             f"with parameters {self.yt_url}",
         )
+        start = time.perf_counter()
         json_result = await self.call_tool(
             "youtube_json",
             {"url": self.yt_url},
         )
+        elapsed = int(time.perf_counter() - start)
         video_id = self.get_video_id(self.yt_url)
         json_path = base_out_dir / f"{video_id}.json"
         with open(json_path, "w", encoding="utf-8") as json_file:
             json_file.write(str(json_result.data))
-        print(f"Result of youtube_json tool in {json_path}")
+        print(f"\nResult of youtube_json tool in {json_path}\n")
+        print(f"The transcription of {video_id}.json "
+              f"took {str(timedelta(seconds=elapsed))}")
 
         # youtube_text
         print(
             "\n\nExecuting 'youtube_text' tool "
             f"with parameters {self.yt_url}",
         )
+        start = time.perf_counter()
         text_result = await self.call_tool(
             "youtube_text",
             {"url": self.yt_url},
         )
+        elapsed = int(time.perf_counter() - start)
         txt_path = base_out_dir / f"{video_id}.txt"
         with open(txt_path, "w", encoding="utf-8") as txt_file:
             txt_file.write(str(text_result.data))
-        print(f"Result of youtube_text tool in {txt_path}")
-
+        print(f"\nResult of youtube_text tool in {txt_path}")
+        print(f"The transcription of {video_id}.txt "
+              f"took {str(timedelta(seconds=elapsed))}")
 # ---------------------------------------------------------------------
 #
 #           Run Example Prompts

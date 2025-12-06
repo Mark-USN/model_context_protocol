@@ -6,6 +6,7 @@ import re
 import json
 import logging
 import time
+import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, TypeVar
 import whisper
@@ -70,7 +71,7 @@ def get_video_id(url: str) -> str:
 def fetch_transcript(
     url: str,
     prefer_langs: Optional[List[str]] = None,
-) -> FetchedTranscript | Dict | None:
+) -> FetchedTranscript | List[Dict] | None:
     """
     Return the transcript for the YouTube video with the given URL.
     If no transcript is available, download the audio and use Whisper to transcribe it.
@@ -153,8 +154,24 @@ def _get_audio_dir() -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
+def _get_transcript_cache_path(video_id: str) -> Path:
+    """Return the path to the cached Whisper transcript JSON for this video."""
+    return _get_transcripts_dir() / f"{video_id}.whisper.json"
 
 # ----------------- Audio + Whisper -----------------
+
+def purge_old_transcripts(days: int = 7) -> None:
+    """Delete transcript files older than the specified number of days.
+        Args:
+            days: Number of days since the file was last accessed 
+                  to keep transcript files (default: 30).
+    """
+    transcript_dir = _get_transcripts_dir()
+    cutoff = time.time() - (days * 86400)
+    for f in transcript_dir.iterdir():
+        if f.is_file() and f.stat().st_atime < cutoff:
+            f.unlink(missing_ok=True)
+
 
 def download_audio(url: str, video_id: str) -> Path:
     """Download audio from a YouTube video using yt-dlp, with simple caching."""
@@ -198,11 +215,6 @@ def download_audio(url: str, video_id: str) -> Path:
             audio_path = audio_dir / f"{info['id']}.wav"
 
     # Clean up old audio files (older than 24 hours) in the audio directory.
-    cutoff = time.time() - (24 * 3600)
-    for f in audio_dir.iterdir():
-        if f.is_file() and f.stat().st_mtime < cutoff:
-            f.unlink(missing_ok=True)
-
     return audio_path
 
 
@@ -211,7 +223,7 @@ def transcribe_with_whisper(
     model_name: str = "small",
     chunk_duration: float = CHUNK_DURATION_SECONDS,
     overlap: float = CHUNK_OVERLAP_SECONDS,
-) -> Optional[Dict]:
+) -> Optional[List[Dict]]:
     """Transcribe an audio file using OpenAI Whisper in overlapping chunks.
 
     The audio is split into chunks of `chunk_duration` seconds with `overlap`
@@ -264,8 +276,9 @@ def transcribe_with_whisper(
 
     step = samples_per_chunk - overlap_samples
 
-    full_text_parts: List[str] = []
-    segments: List[Dict] = []
+    # full_text_parts: List[str] = []
+    # segments: List[Dict] = []
+    chunks: List[Dict] = []
 
     # Iterate over the audio in steps of "step" samples
     chunk_index = 0
@@ -292,37 +305,47 @@ def transcribe_with_whisper(
         )
 
         # Whisper expects a float32 array (which load_audio already returns)
-        result = whisper.transcribe(model, segment_audio)
+        chunk = whisper.transcribe(model, segment_audio)
+        chunks.append(chunk)
 
-        chunk_text = result.get("text", "").strip()
-        if chunk_text:
-            full_text_parts.append(chunk_text)
-            segments.append(
-                {
-                    "index": chunk_index,
-                    "start": start_time,
-                    "end": end_time,
-                    "text": chunk_text,
-                },
-            )
+        # chunk_text = result.get("text", "").strip()
+        # if chunk_text:
+        #     full_text_parts.append(chunk_text)
+        #     segments.append(
+        #         {
+        #             "index": chunk_index,
+        #             "start": start_time,
+        #             "end": end_time,
+        #             "text": chunk_text,
+        #         },
+        #     )
 
         chunk_index += 1
 
         if end_sample >= num_samples:
             break
 
-    combined_text = " ".join(full_text_parts).strip()
+    # # Up to here we have two lists: full_text_parts and segments
 
-    return {
-        "text": combined_text,
-        "segments": segments,
-        "chunk_duration": chunk_duration,
-        "overlap": overlap,
-    }
+    # combined_text = " ".join(full_text_parts).strip()
+
+    # return = {
+    #     "text": combined_text,
+    #     "segments": segments,
+    #     "chunk_duration": chunk_duration,
+    #     "overlap": overlap,
+    # }
+
+    # Done with the audio file
+    audio_path.unlink(missing_ok=True)
+
+    return chunks
 
 
-def fetch_transcript_from_audio(url: str, video_id: str) -> Optional[Dict]:
-    """Download audio from YouTube and transcribe it with Whisper.
+
+
+def fetch_transcript_from_audio(url: str, video_id: str) -> Optional[List[Dict]]:
+    """Download audio from YouTube and transcribe it with Whisper, with caching.
 
         Args:
             url: The YouTube video URL.
@@ -331,22 +354,53 @@ def fetch_transcript_from_audio(url: str, video_id: str) -> Optional[Dict]:
         Returns:
             The transcript as a dictionary, or None if transcription failed.
     """
+    cache_path = _get_transcript_cache_path(video_id)
+
+    # 1) If we already have a cached Whisper transcript, reuse it.
+    if cache_path.exists():
+        logger.info("✅ Using cached Whisper transcript for %s", video_id)
+        try:
+            with cache_path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:  # pragma: no cover - cache read is best-effort
+            logger.warning(
+                "⚠️ Failed to load cached transcript %s: %s; recomputing.",
+                cache_path,
+                exc,
+            )
+
+    # 2) No cache (or cache failed) – do the full Whisper path.
     logger.warning("⚠️ No subtitles. Downloading audio and transcribing with Whisper...")
 
     # Ensure ffmpeg exists and is on PATH for this process (for whisper).
     ffmpeg_dir = ensure_ffmpeg_on_path()
     logger.info("✅ Using ffmpeg from: %s", ffmpeg_dir)
 
+    chunks: List[Dict] = []
     audio_path = download_audio(url, video_id)
-    transcript = transcribe_with_whisper(
+    chunks = transcribe_with_whisper(
         audio_path,
         # 20251130 MMH Changed from "base" to "small" gives better transcripts
         # especially for technical content.
-        model_name="small",             
+        model_name="small",
         chunk_duration=CHUNK_DURATION_SECONDS,
         overlap=CHUNK_OVERLAP_SECONDS,
     )
-    return transcript
+
+    # 3) Save to cache if we got a transcript.
+    if chunks is not None:
+        try:
+            with cache_path.open("w", encoding="utf-8") as f:
+                json.dump(chunks, f, ensure_ascii=False, indent=2)
+            logger.info("💾 Saved Whisper transcript cache to %s", cache_path)
+        except Exception as exc:  # pragma: no cover - cache write is best-effort
+            logger.warning(
+                "⚠️ Failed to write transcript cache %s: %s",
+                cache_path,
+                exc,
+            )
+
+    return chunks
 
 
 # ----------------- MCP TOOLS -----------------
@@ -408,7 +462,8 @@ def youtube_text(url: str = "", prefer_lang: List[str] | None = None) -> str | N
             transcribed_text += snippet["text"] + " "
     else:
         # Whisper's dict has a "text" key with the full text.
-        transcribed_text = transcript.get("text", "")
+        full_text_parts = [pt['text'] for pt in transcript]
+        transcribed_text = " ".join(full_text_parts).strip()
 
     return transcribed_text.strip()
 
@@ -430,11 +485,21 @@ def register(mcp: T) -> None:
 
 
 # ----------------- CLI -----------------
+def main() -> None:
+    """ CLI entry point to test the YouTube to text tool. """
+    import fastmcp, torch
+    from datetime import timedelta
+    print("\nfastmcp:", fastmcp.__version__)
+    print("torch:", torch.__version__)
+    print("CUDA available:", torch.cuda.is_available())
+    print("Device count:", torch.cuda.device_count())
+    print("Whisper models available:", whisper.available_models())
 
-if __name__ == "__main__":
+
     # CLI for testing the YouTube to text tool.
-    # yt_url = "https://www.youtube.com/watch?v=DAYJZLERqe8"
-    yt_url = "https://www.youtube.com/watch?v=_uQrJ0TkZlc"
+    # yt_url = "https://www.youtube.com/watch?v=DAYJZLERqe8"    # 6:32 comedy
+    # yt_url = "https://www.youtube.com/watch?v=_uQrJ0TkZlc" # 6 + hours!
+    yt_url = "https://www.youtube.com/watch?v=Ro_MScTDfU4"      # 30:34 Python
     while not yt_url:
         yt_url = input("Enter YouTube URL: ").strip()
         if not yt_url:
@@ -449,14 +514,18 @@ if __name__ == "__main__":
     logger.info("✅ Using ffmpeg at %s", get_ffmpeg_binary_path())
     start = time.perf_counter()
     json_trans = youtube_json(yt_url)
-    end = time.perf_counter()
-    logger.info("✅ Transcribed in %.6f seconds.", end - start)
+    elapsed = time.perf_counter()-start
     print("\n\n--- JSON TRANSCRIPT ---\n")
-    print(f"{json_trans}")
+    print(f"{json_trans}", flush=True)
+    print(f"✅ Transcribed in {str(timedelta(seconds=elapsed))} seconds.")
 
     start = time.perf_counter()
     text_trans = youtube_text(yt_url)
     end = time.perf_counter()
-    logger.info("✅ Transcribed in %.6f seconds.", end - start)
     print("\n\n--- TEXT TRANSCRIPT ---\n")
-    print(f"{text_trans}")
+    print(f"{text_trans}", flush=True)
+    print(f"✅ Transcribed in {str(timedelta(seconds=elapsed))} seconds.")
+
+    
+if __name__ == "__main__":
+    main()

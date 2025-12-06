@@ -36,7 +36,7 @@ def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
     elif maxResults > 50:
         maxResults = 50
 
-    API_KEY = ""
+    API_KEY = "AIzaSyAGsxSmpJdV-oJomUvFeQrowZqo2rHA0gw"
 
     youtube = build("youtube", "v3", developerKey=API_KEY)
 
@@ -77,7 +77,7 @@ def get_video_info(query:str, maxResults:int=1, order="viewCount" ):
     if order not in ["date", "rating", "relevance", "title", "videoCount"]:
         order="viewCount"
 
-    API_KEY = "AIzaSyAGsxSmpJdV-oJomUvFeQrowZqo2rHA0gw"
+    API_KEY = ""
 
     youtube = build("youtube", "v3", developerKey=API_KEY)
 
