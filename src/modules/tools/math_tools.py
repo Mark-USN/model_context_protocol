@@ -1,5 +1,5 @@
-# math_tools.py
-
+﻿# math_tools.py
+""" Math tools module for FastMCP server. """
 import logging
 from typing import TypeVar
 from pathlib import Path
@@ -25,10 +25,11 @@ def add(a: float, b: float) -> str:
     return str(float(a) + float(b))
 
 def multiply(a: float, b: float) -> str:
+    """Multiply two numbers (strings ok); returns string."""
     return str(float(a) * float(b))
 
 def register(mcp: T):
     """Register math tools with MCPServer."""
-    logger.info("Registering math tools")
+    logger.info("✅ Registering math tools")
     mcp.tool(tags=["public", "api"])(add)
     mcp.tool(tags=["public", "api"])(multiply)

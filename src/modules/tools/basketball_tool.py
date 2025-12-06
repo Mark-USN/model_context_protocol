@@ -5,7 +5,8 @@ Simulates retrieving player and team statistics.
 """
 
 import logging
-from typing import Any, Dict, List, TypeVar
+from pathlib import Path
+from typing import Any, Dict, TypeVar
 from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
@@ -29,11 +30,11 @@ logger = logging.getLogger(Path(__file__).stem)
 def get_team_stats(team_name: str) -> Dict[str, Any]:
     """Return mock basketball team statistics."""
     if not isinstance(team_name, str) or not team_name.strip():
-        logger.error("Invalid team name provided.")
+        logger.error("❌ Invalid team name provided.")
         return {"status": "error", "error": "Invalid team name."}
 
     # Mock data
-    logger.debug(f"Retrieving stats for team: {team_name}")
+    logger.debug("✅ Retrieving stats for team: %s.", team_name)
     return {
         "status": "ok",
         "function": "get_team_stats",
@@ -49,7 +50,7 @@ def get_team_stats(team_name: str) -> Dict[str, Any]:
 # -----------------------
 def register(mcp: T):
     """Register basketball tools with MCPServer."""
-    logger.info("Registering basketball tools")
+    logger.info("✅ Registering basketball tools")
     mcp.tool(tags=["public", "api"])(get_team_stats)
 
 

@@ -1,24 +1,19 @@
-﻿""" 20251101 MMH demo_server.py — FastMCP server that discovers tools/prompts/resources.
+﻿""" 20251101 MMH demo_server.py — FastMCP server that discovers 
+        tools/prompts/resources.
     Based on https://gofastmcp.com/servers/server
-    Added code to automatically register tools and prompts from their packages. from the 'tools' package,
+    Added code to automatically register tools and prompts from their packages.
+        from the 'tools' package,
 """
 # TODO: 20251101 MMH Add resource_loader.py and resource_template_loader.py
 
-import os
-import sys
 import argparse
 import logging
-import importlib
-import json
-import pkgutil
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Tuple
+from fastmcp import FastMCP
 from ..utils.prompt_md_loader import register_prompts_from_markdown
 from ..utils.prompt_loader import register_prompts
 from ..utils.tool_loader import register_tools
-from ..utils.get_icons import get_icon
 
-from fastmcp import FastMCP
 
 # -----------------------------
 # Logging setup
@@ -64,13 +59,13 @@ def attach_everything():
         Make sure you trust the code in those packages!
     """
     register_tools(mcp, package=_TOOLS_DIR)
-    logger.info(f"{get_icon('check')} Tools registered.")
+    logger.info("✅	 Tools registered.")
 
     register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
-    logger.info(f"{get_icon('check')} Markdown files parsed and prompts registered.")
+    logger.info("✅	 Markdown files parsed and prompts registered.")
 
     register_prompts(mcp, package=_PROMPTS_DIR)
-    logger.info(f"{get_icon('check')} Prompt functions registered.")
+    logger.info("✅	 Prompt functions registered.")
 
 def launch_server(host:str="127.0.0.1", port:int=8085):
     """ 20251101 MMH launch_server
@@ -79,7 +74,7 @@ def launch_server(host:str="127.0.0.1", port:int=8085):
     """
     attach_everything()
     mcp.run(transport="http", host=host, port=port)
-    logger.info(f"{get_icon('check')} Server started on http://{host}:{port}")
+    logger.info("✅	 Server started on http://{host}:{port}")
 
 
 # -----------------------------
@@ -91,9 +86,9 @@ def port_type(value: str) -> int:
     """
     try:
         port = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"Port must be an integer (got {value!r})")
-    if not (1 <= port <= 65535):
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Port must be an integer (got {value!r})") from e
+    if not 1 <= port <= 65535:
         raise argparse.ArgumentTypeError(f"Port number must be between 1 and 65535 (got {port})")
     return port
 
@@ -103,12 +98,13 @@ def main():
         Parse arguments and start the server. 
     """
     parser = argparse.ArgumentParser(description="Create and run an MCP server.")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host name or IP address (default 127.0.0.1).")
-    parser.add_argument("--port", type=port_type, default=8085, help="TCP port to bind/connect (default 8085).")
+    parser.add_argument("--host", type=str, default="127.0.0.1",
+                        help="Host name or IP address (default 127.0.0.1).")
+    parser.add_argument("--port", type=port_type, default=8085,
+                        help="TCP port to bind/connect (default 8085).")
     args = parser.parse_args()
 
     launch_server(args.host, args.port)
 
 if __name__ == "__main__":
-    """ If run as a script, execute main(). """
     main()
