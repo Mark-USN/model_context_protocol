@@ -10,9 +10,9 @@ import pkgutil
 import json
 import logging
 from types import ModuleType
+from typing import Any, List, TypeVar
 from pathlib import Path
 import frontmatter
-from typing import Any, List, Optional, TypeVar, Dict
 from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
@@ -32,9 +32,9 @@ full_path = Path(__file__)
 
 default_resource_path = full_path.parent.parent / "resources"
 
-resources_dic = Dict[str, Dict[str, Any]] = {}
+resources_dict : dict[str, dict[str, Any]] ={}
 
-def discover_resources(resources_dir: Path = default_resource_path) -> None:
+def discover_resources(resources_dir: Path) -> None: # = default_resource_path) -> None:
     """
     Load all .json files found in the resources directory into the global resources_dic.
 
@@ -48,22 +48,20 @@ def discover_resources(resources_dir: Path = default_resource_path) -> None:
     """
 
     if not resources_dir.exists():
-        logger.error("❌ Prompts directory %s does not exist.",resources_dir)
+        logger.error("❌ Resources directory %s does not exist.",resources_dir)
         return
     files = resources_dir.rglob("*.json")
 
     if len (list(files)) == 0:
         logger.warning("⚠️ No resource files found in directory '%s'", resources_dir)
         return
-    else:
-        for r in files:
-            text = r.read_text(encoding="utf-8")
-            post = frontmatter.loads(text)
-            name = (post.metadata or {}).pop("name", r.stem)
-            resources_dic[name] = {"name": name, "text": post.content.strip(), "meta": dict(post.metadata or {})}
-    
 
-
+    for r in files:
+        text = r.read_text(encoding="utf-8")
+        post = frontmatter.load(text)
+        name = (post.metadata or {}).pop("name", r.stem)
+        resources_dict[name] = {"name": name, "text": post.content.strip(),
+                                "meta": dict(post.metadata or {})}
 
 def discover_resource(package: Path = default_resource_path) -> List[ModuleType]:
     """
@@ -85,7 +83,7 @@ def discover_resource(package: Path = default_resource_path) -> List[ModuleType]
 
     for _, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
         # TODO: MCP does not handle submodules. Need to add code to recurse
-        # into subpackages and 'flatten' them into the main package namespace. 
+        # into subpackages and 'flatten' them into the main package namespace.
         if ispkg :
             continue
         # if ispkg or not modname.endswith("_tool"):
@@ -96,8 +94,9 @@ def discover_resource(package: Path = default_resource_path) -> List[ModuleType]
             module = importlib.import_module(full_name)
             modules.append(module)
             logger.info("✅ Loaded tool module: %s", full_name)
-        except Exception as e:
+        except Exception as e:      # pylint: disable=broad-exception-caught
             logger.exception("❌ Error importing module %s: %s", full_name, e)
+            continue
 
     return modules
 
@@ -130,11 +129,8 @@ def register_resource_in_module(mcp: Any, module: ModuleType) -> None:
         logger.warning("⚠️ Module %s has no register(mcp) function", module.__name__)
         return
 
-    try:
-        module.register(mcp)
-        logger.info("🔧 Registered resource from %s", module.__name__)
-    except Exception as e:
-        logger.exception("❌ Failed to register resource from %s: %s", module.__name__, e)
+    module.register(mcp)
+    logger.info("🔧 Registered resource from %s", module.__name__)
 
 
 def load_resources_from_dir(dir_path: Path) -> None:
@@ -146,12 +142,13 @@ def load_resources_from_dir(dir_path: Path) -> None:
     if not dir_path.exists():
         return
     for p in dir_path.rglob("*.json"):
+        props: dict[str, Any] = {}
         meta = json.loads(p.read_text(encoding="utf-8"))
         name = meta["name"]
-        RESOURCES[name] = {
+        props = {
             "name": name,
             "uri": meta["uri"],
             "mime": meta.get("mime", "application/octet-stream"),
             "meta": {k: v for k, v in meta.items() if k not in {"name", "uri", "mime"}},
         }
-
+        resources_dict[name] = props

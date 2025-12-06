@@ -13,10 +13,10 @@ import logging
 import hashlib
 from types import ModuleType
 from pathlib import Path
-from typing import Any, List, Optional, TypeVar, Dict
+from typing import List, TypeVar
 from fastmcp import FastMCP
 
-T = TypeVar("T", bound=FastMCP) 
+T = TypeVar("T", bound=FastMCP)
 
 # -----------------------------
 # Logging setup
@@ -105,8 +105,7 @@ def load_module_from_path(
             sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
             return mod, module_name
-        else:
-            raise ImportError(f"Unsupported path type: {p}")
+        raise ImportError(f"Unsupported path type: {p}")
 
 
 
@@ -130,17 +129,13 @@ def discover_prompts(package: str = ".prompts") -> List[ModuleType]:
 
     for _, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
         # TODO: MCP does not handle submodules. Need to add code to recurse
-        # into subpackages and 'flatten' them into the main package namespace. 
+        # into subpackages and 'flatten' them into the main package namespace.
         if ispkg :
             continue
-
         full_name = f"{package}.{modname}"
-        try:
-            module = importlib.import_module(full_name)
-            modules.append(module)
-            logger.info("✅ Loaded prompt module: %s", full_name)
-        except Exception as e:
-            logger.exception("❌ Error importing module %s: %s", full_name, e)
+        module = importlib.import_module(full_name)
+        modules.append(module)
+        logger.info("✅ Loaded prompt module: %s", full_name)
 
     return modules
 
@@ -160,12 +155,16 @@ def register_prompts(mcp: T, package: Path | str = "..prompts") -> None:
         prompts_pkg = Path(package)
 
     if not prompts_pkg.exists() or not prompts_pkg.is_dir():
-        logger.exception(f"❌ Prompts directory {prompts_pkg} does not exist or is not a directory.")
+        logger.exception("❌ Prompts directory %s does not exist or is not "
+                         "a directory.", prompts_pkg)
         return
 
-    mod, module_name = load_module_from_path(path=prompts_pkg, sys_path_root=_REL_PATH,
-                        module_name="prompts", add_sys_path=True)
-
+    _, module_name = load_module_from_path(
+            path=prompts_pkg,
+            sys_path_root=_REL_PATH,
+            module_name="prompts",
+            add_sys_path=True
+            )
 
     modules = discover_prompts(module_name)
     if not modules:
@@ -187,8 +186,5 @@ def register_prompts_in_module(mcp: T, module: ModuleType) -> None:
         logger.warning("⚠️ Module %s has no register(mcp) function", module.__name__)
         return
 
-    try:
-        module.register(mcp)
-        logger.info("🔧 Registered prompts from %s", module.__name__)
-    except Exception as e:
-        logger.exception("❌ Failed to register prompts from %s: %s", module.__name__, e)
+    module.register(mcp)
+    logger.info("🔧 Registered prompts from %s", module.__name__)

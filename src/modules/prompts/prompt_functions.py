@@ -1,9 +1,9 @@
-# prompt_functions.py
-
+﻿# prompt_functions.py
+""" Definition of various prompt functions for use with MCPServer. """
 
 import logging
 from pathlib import Path
-from typing import TypeVar, List, Dict
+from typing import TypeVar, List
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import Message, PromptMessage, TextContent, PromptResult
 from pydantic import Field
@@ -60,7 +60,8 @@ def data_analysis_prompt(
     """
     return f"Please perform a '{analysis_type}' analysis on the data found at {data_uri}."
 
-def analyze_data(numbers: List[int], metadata: Dict[str, str], threshold: float) -> str:
+# def analyze_data(numbers: List[int], metadata: Dict[str, str], threshold: float) -> str:
+def analyze_data(numbers: List[int], threshold: float) -> str:
     """Analyze numerical data.
         Args:
             numbers (List[int]): List of numbers to analyze.
@@ -86,8 +87,8 @@ def roleplay_scenario(character: str, situation: str) -> PromptResult:
     ]
 
 def data_analysis_prompt_chart_op(
-    data_uri: str, 
-    analysis_type: str = "summary", 
+    data_uri: str,
+    analysis_type: str = "summary",
     include_charts: bool = False) -> str:
     """Creates a request to analyze data with specific parameters and optional chart request.
         Args:
@@ -107,10 +108,9 @@ def register(mcp: T):
         Args:
             mcp (T): The MCP server instance.
     """
-    logger.info("Registering prompts")
+    logger.info("✅ Registering prompts")
     mcp.prompt(tags=["public", "api"])(ask_about_topic)
     mcp.prompt(tags=["public", "api"])(generate_code_request)
     mcp.prompt(tags=["public", "api"])(data_analysis_prompt)
     mcp.prompt(tags=["public", "api"])(roleplay_scenario)
     mcp.prompt(tags=["public", "api"])(data_analysis_prompt_chart_op)
-
