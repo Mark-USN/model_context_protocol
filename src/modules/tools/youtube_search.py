@@ -6,7 +6,7 @@ from typing import TypeVar
 from pathlib import Path
 from fastmcp import FastMCP
 from googleapiclient.discovery import build
-
+from ..utils.api_keys import api_vault
 
 T = TypeVar("T", bound=FastMCP)
 
@@ -21,6 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(Path(__file__).stem)
 
+api_keys = api_vault()
+        
 
 
 def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
@@ -36,9 +38,8 @@ def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
     elif maxResults > 50:
         maxResults = 50
 
-    API_KEY = "AIzaSyAGsxSmpJdV-oJomUvFeQrowZqo2rHA0gw"
-
-    youtube = build("youtube", "v3", developerKey=API_KEY)
+    google_key = api_keys.get_value("GOOGLE_KEY")
+    youtube = build("youtube", "v3", developerKey=google_key)
 
     request = youtube.search().list(         # pylint: disable=no-member
         part="snippet",

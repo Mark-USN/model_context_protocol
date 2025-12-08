@@ -203,6 +203,7 @@ class UniversalClient(Client):
         import fastmcp, torch
         import time
         from datetime import timedelta
+        print("\n\n⚠The below information is only relevant if the client is run on the same machine as the server.")
         print("\nfastmcp:", fastmcp.__version__)
         print("torch:", torch.__version__)
         print("CUDA available:", torch.cuda.is_available())
