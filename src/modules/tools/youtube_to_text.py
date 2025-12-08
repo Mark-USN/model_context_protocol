@@ -79,15 +79,22 @@ def fetch_transcript(
     video_id = get_video_id(url)
     prefer_langs = prefer_langs or ["en", "es"]
     transcript: FetchedTranscript | Dict | None = None
+    transcripts: List | None = None
 
     ytt_api = YouTubeTranscriptApi()
-    transcripts = ytt_api.list(video_id=video_id)
+    try:
+        transcripts = ytt_api.list(video_id=video_id)
+    except (TranscriptsDisabled, NoTranscriptFound) as e:
+        logger.info("✅ No transcripts: %s", e)
+        transcript = fetch_transcript_from_audio(url=url, video_id=video_id)
+        return transcript
+
 
     # Log available languages
     langs_list = [getattr(tr, "language_code", "?") for tr in transcripts]
     logger.debug("✅ Available languages: %s", langs_list)
 
-    if not FORCE_AUDIO_TRANSCRIPT and len(langs_list) > 0:
+    if not FORCE_AUDIO_TRANSCRIPT and len(langs_list) and transcript is None> 0:
         # 1) Try preferred languages directly (this returns the raw list[dict])
         for lang in prefer_langs:
             try:
@@ -498,8 +505,11 @@ def main() -> None:
 
     # CLI for testing the YouTube to text tool.
     # yt_url = "https://www.youtube.com/watch?v=DAYJZLERqe8"    # 6:32 comedy
-    # yt_url = "https://www.youtube.com/watch?v=_uQrJ0TkZlc" # 6 + hours!
-    yt_url = "https://www.youtube.com/watch?v=Ro_MScTDfU4"      # 30:34 Python
+    # yt_url = "https://www.youtube.com/watch?v=_uQrJ0TkZlc"    # 6 + hours!
+    # yt_url = "https://www.youtube.com/watch?v=Ro_MScTDfU4"    # 30:34 Python tutorial < 30 Mins
+    yt_url = "https://www.youtube.com/watch?v=gJz4lByMHUg"    # Just music
+    # yt_url = "https://youtu.be/N23vXA-ai5M?list=PLC37ED4C488778E7E&index=1"
+    # yt_url = "https://youtu.be/N23vXA-ai5M"
     while not yt_url:
         yt_url = input("Enter YouTube URL: ").strip()
         if not yt_url:
@@ -521,7 +531,7 @@ def main() -> None:
 
     start = time.perf_counter()
     text_trans = youtube_text(yt_url)
-    end = time.perf_counter()
+    elapsed = time.perf_counter()-start
     print("\n\n--- TEXT TRANSCRIPT ---\n")
     print(f"{text_trans}", flush=True)
     print(f"✅ Transcribed in {str(timedelta(seconds=elapsed))} seconds.")
