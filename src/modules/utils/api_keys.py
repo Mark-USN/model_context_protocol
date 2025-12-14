@@ -1,5 +1,5 @@
 """ A simple API keys management class using python-dotenv."""
-import os
+# import os
 import dotenv
 import logging
 from pathlib import Path
@@ -27,7 +27,7 @@ class api_vault(object):
                 self.keys = dotenv.dotenv_values()
 
         except Exception as e:
-            logger.error(f"Error loading keys from {keys_file}: {e}")
+            logger.error("Error loading keys from %s: %s", keys_file, e)
             raise e
 
     def get_value(self, key:str):
@@ -37,6 +37,6 @@ class api_vault(object):
 
 
 if __name__ == "__main__":
-    api = api.api_keys()
+    api = api_vault()
     value = api.get_value("GOOGLE_KEY")
     print(f"The value for Google_Key is: {value}")

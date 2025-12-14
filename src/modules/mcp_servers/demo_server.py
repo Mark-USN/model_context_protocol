@@ -13,6 +13,7 @@ from fastmcp import FastMCP
 from ..utils.prompt_md_loader import register_prompts_from_markdown
 from ..utils.prompt_loader import register_prompts
 from ..utils.tool_loader import register_tools
+from ..utils.long_tool_loader import register_long_tools
 
 
 # -----------------------------
@@ -59,6 +60,9 @@ def attach_everything():
         Make sure you trust the code in those packages!
     """
     register_tools(mcp, package=_TOOLS_DIR)
+    logger.info("✅	 Tools registered.")
+
+    register_long_tools(mcp, package=_TOOLS_DIR)
     logger.info("✅	 Tools registered.")
 
     register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)

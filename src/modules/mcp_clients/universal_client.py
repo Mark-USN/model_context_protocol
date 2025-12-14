@@ -6,11 +6,8 @@
 import asyncio
 from pathlib import Path
 import re
-# import json
 import logging
-# from collections.abc import Mapping
 from fastmcp import Client
-# from fastmcp.client.client import CallToolResult
 
 # -----------------------------
 # Logging setup
@@ -280,6 +277,48 @@ class UniversalClient(Client):
         print(f"\nResult of youtube_text tool in {txt_path}")
         print(f"The transcription of {video_id}.txt "
               f"took {str(timedelta(seconds=elapsed))}")
+
+
+
+        #           Run Audio Tools
+
+        # youtube_audio_json
+        print(
+            "\n\nExecuting 'youtube_audio_json' tool "
+            f"with parameters {self.yt_url}",
+        )
+        start = time.perf_counter()
+        json_result = await self.call_tool(
+            "youtube_audio_json",
+            {"url": self.yt_url},
+        )
+        elapsed = int(time.perf_counter() - start)
+        video_id = self.get_video_id(self.yt_url)
+        json_path = base_out_dir / f"{video_id}_audio.json"
+        with open(json_path, "w", encoding="utf-8") as json_file:
+            json_file.write(str(json_result.data))
+        print(f"\nResult of youtube_json tool in {json_path}\n")
+        print(f"The transcription of {video_id}_audio.json "
+              f"took {str(timedelta(seconds=elapsed))}")
+
+        # youtube_audio_text
+        print(
+            "\n\nExecuting 'youtube_audio_text' tool "
+            f"with parameters {self.yt_url}",
+        )
+        start = time.perf_counter()
+        text_result = await self.call_tool(
+            "youtube_audio_text",
+            {"url": self.yt_url},
+        )
+        elapsed = int(time.perf_counter() - start)
+        txt_path = base_out_dir / f"{video_id}_audio.txt"
+        with open(txt_path, "w", encoding="utf-8") as txt_file:
+            txt_file.write(str(text_result.data))
+        print(f"\nResult of youtube_text tool in {txt_path}")
+        print(f"The transcription of {video_id}_audio.txt "
+              f"took {str(timedelta(seconds=elapsed))}")
+
 # ---------------------------------------------------------------------
 #
 #           Run Example Prompts

@@ -102,20 +102,23 @@ def register(mcp: T):
     mcp.tool(tags=["public", "api"])(get_video_info)
 
 # ----------------- CLI -----------------
-if __name__ == "__main__":
+def main():
     """ CLI for testing the YouTube search tool. """
     # Change this to url = "" to prompt for input.
-    qry = "Python Optional Tutorial"
+    qry = "Python Modulal Tutorial"
     while not qry:
         qry = input("Enter YouTube Search query: ").strip()
         if not qry:
             logger.warning("⚠️ Please paste a valid search query.")
     try:
-        urls = get_most_relevant_video_url(qry, 50)
-        print(f"Most Relevant Youtube Videos are:\n{urls}")
-
+        # urls = get_most_relevant_video_url(qry, 10)
+        # print(f"Most Relevant Youtube Videos for \"{qry}\" are:\n")
+        # for url in urls:
+        #     print(f"- {url}")
         results = get_video_info(qry, maxResults=5, order="date")
         print(f"Video Info by date:\n{results}")
  
     except Exception as e:
         logger.error("❌ Error: %s", e)
+if __name__ == "__main__":
+    main()
