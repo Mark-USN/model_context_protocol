@@ -6,25 +6,27 @@
 import asyncio
 from pathlib import Path
 import re
+import time
+import json
+import random
 import logging
+# from ..utils.logging_config import setup_logging
+from typing import Any, List, Dict, Optional, TypeVar
+from datetime import timedelta
+
 from fastmcp import Client
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+# setup_logging()
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
 # Control which examples to run
+# ---------------------------------------------------------------------
 RUN_TOOL_EXAMPLES = True
 RUN_PROMPT_EXAMPLES = False
-# ---------------------------------------------------------------------
 
 class UniversalClient(Client):
     """ 20251003 MMH universal_client class
@@ -33,8 +35,12 @@ class UniversalClient(Client):
         and demonstrates calling some example tools.
     """
     # Variable to hold YouTube URL
-    yt_url: str = ""
+    yt_urls: str | Optional[List::str] = None
     yt_search: str = ""
+    token: Optional[Dict] = None
+    MAX_SEARCH_RESULTS: int = 5
+    _next_allowed_ts: float = 0.0  # simple global limiter
+
 
     def __init__(self, host: str, port: int):
         """ 20251003 MMH universal_client __init__
@@ -43,7 +49,9 @@ class UniversalClient(Client):
         self.url = f"http://{host}:{port}/mcp"
         super().__init__(self.url)
 
-    # ----------------- Helpers -----------------
+# ---------------------------------------------------------------------
+# Helper Methods
+# ---------------------------------------------------------------------
     def get_video_id(self, url: str) -> str:
         """Extract the YouTube video ID from a URL.
             Args: url: The YouTube video URL.
@@ -62,6 +70,108 @@ class UniversalClient(Client):
         if m:
             return m.group(1)
         raise ValueError("Invalid YouTube URL")
+
+    def base_output_dir(self) -> Path:
+        """Base folder for project cache (inside mymcpserver/cache)."""
+        out_dir = Path(__file__).resolve().parents[3] / "cache" / "universal_client"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    async def call_long_tool_and_get_result(self, tool_name: str, args: dict, *, poll_s: float = 2.0):
+        """Call a long-running tool and poll for its result.
+        Args:
+            tool_name: The name of the tool to call.
+            args: The arguments to pass to the tool
+            poll_s: Polling interval in seconds.
+        Returns:
+            The result of the long-running tool.
+        """
+        # Launch job (long_job_server behavior)
+        launch = await self.call_tool(tool_name, args)
+        launch_data = launch.data
+
+        if "job_id" not in launch_data:
+            # If you accidentally hit demo_server, this might already be the real result.
+            return launch_data
+
+        job_id = launch_data["job_id"]
+
+        while True:
+            status = await self.call_tool("get_job_status", {"job_id": job_id, "token": args["token"]})
+            s = status.data
+            state = s.get("state")
+
+            if state in ("done", "failed", "timed_out", "canceled"):
+                break
+
+            await asyncio.sleep(poll_s)
+
+        result = await self.call_tool("get_job_result", {"job_id": job_id, "token": args["token"]})
+        return result.data
+
+    async def _throttle(self, *, min_interval_s: float, jitter_s: float) -> None:
+        """Ensure at least min_interval_s between tool calls (plus jitter) to help
+            keep YouTube from blocking our requests.
+            Args:
+                min_interval_s: Minimum interval between calls in seconds.
+                jitter_s: Maximum jitter to add to wait time in seconds.   
+            Returns:
+                None
+        """
+        now = time.monotonic()
+        wait = max(0.0, self._next_allowed_ts - now)
+        # add jitter every time (helps avoid "machine-like" spacing)
+        wait += random.uniform(0.0, jitter_s)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        self._next_allowed_ts = time.monotonic() + min_interval_s
+
+    async def call_tools_polite(
+        self,
+        tool_name: str,
+        args: dict,
+        *,
+        min_interval_s: float = 2.5,
+        jitter_s: float = 1.5,
+        max_retries: int = 4,
+        base_backoff_s: float = 15.0,
+    ):
+        """ Call a tool with throttling + exponential backoff on transient blocks.
+            Trying to be polite to avoid being blocked by rate limits at YouTube.
+            Args:
+                tool_name: The name of the tool to call.
+                args: The arguments to pass to the tool
+                min_interval_s: Minimum interval between calls in seconds.
+                jitter_s: Maximum jitter to add to wait time in seconds.
+                max_retries: Maximum number of retries on transient errors.
+                base_backoff_s: Base backoff time in seconds for retries.
+            Returns:
+                The result of the tool call.
+        """
+        attempt = 0
+             
+        while True:
+            await self._throttle(min_interval_s=min_interval_s, jitter_s=jitter_s)
+            try:
+                if args.get("token") is None:
+                    return await self.call_tool(tool_name, args)
+                else:
+                    return await self.call_long_tool_and_get_result(tool_name, args)
+            except Exception as e:
+                msg = str(e).lower()
+                # Heuristic: adjust based on your actual exception strings
+                transient = any(k in msg for k in ["429", "too many requests", "blocked", "requestblocked", "rate"])
+                if (not transient) or (attempt >= max_retries):
+                    raise
+                sleep_s = base_backoff_s * (2 ** attempt) + random.uniform(0, 5)
+                logger.warning("Transient error calling %s (attempt %s/%s): %s; sleeping %.1fs",
+                               tool_name, attempt + 1, max_retries + 1, e, sleep_s)
+                await asyncio.sleep(sleep_s)
+                attempt += 1
+
+# ---------------------------------------------------------------------
+# Start Client/Server Interaction
+# ---------------------------------------------------------------------
 
 
     async def run(self) -> None:
@@ -197,6 +307,7 @@ class UniversalClient(Client):
 
     async def _run_youtube_demo(self) -> None:
         """Demonstrate YouTube-related tools."""
+        # Show fastmcp and torch versions, CUDA availability, etc.
         import fastmcp, torch
         import time
         from datetime import timedelta
@@ -208,7 +319,8 @@ class UniversalClient(Client):
         print("\n")
         
         # Ask user for Search Term once
-        # self.yt_search = "Python programming tutorials"
+        # self.yt_search = "Python programming using async tutorials"
+        self.yt_search = "chromaticity and color preception"
 
         while not self.yt_search:
             self.yt_search = input("\033[1mEnter Search for YouTube: \033[0m").strip()
@@ -216,108 +328,171 @@ class UniversalClient(Client):
                 logger.warning(
                     "⚠️ Please enter a valid search term.",
                 )
-
-        base_out_dir = (
-            Path(__file__)
-            .parents[3]
-            .resolve()
-            / "outputs"
-        )
-        base_out_dir.mkdir(parents=True, exist_ok=True)
         
         # youtube_search
         print(
             "\n\nExecuting 'get_most_relevant_video_url' tool "
-            f"with parameters {self.yt_search}",
+            f"with parameters {self.yt_search}, {self.MAX_SEARCH_RESULTS}.",
         )
+        yt_url_result = None
         yt_url_result = await self.call_tool(
             "get_most_relevant_video_url",
-            {"query": self.yt_search},
+            {"query": self.yt_search,
+             "maxResults": self.MAX_SEARCH_RESULTS},
         )
-
-        # print(f"yt_url_result.data: \n{yt_url_result.data}\n")
-
         # When working with LLMs result.content might be preferred.
-        self.yt_url = yt_url_result.data
-        print(f"\nMost relevant YouTube URL: {self.yt_url}")
+        self.yt_urls = yt_url_result.data
+        if isinstance(self.yt_urls, str):
+            print(f"\nMost relevant YouTube URL: {self.yt_urls}")
+        elif isinstance(self.yt_urls, List):
+            print(f"\nMost relevant YouTube URLs:\n")
+            for url in self.yt_urls:
+                print(f"- {url}")
 
+        await self.get_all_transcripts()
+        await self.get_all_audio_transcripts()
+
+    # ---------------------------------------------------------------------
+    #           YouTube Transcript Methods (Subtitles/Captions)
+    # ---------------------------------------------------------------------
+
+    async def get_a_transcript(self, url: str) -> None:
+        """ Get transcripts for a given YouTube URL using various tools.
+                Args:
+                    yt_url: The YouTube video URL.
+        """
         # youtube_json
         print(
             "\n\nExecuting 'youtube_json' tool "
-            f"with parameters {self.yt_url}",
+            f"with parameters {url}",
         )
         start = time.perf_counter()
-        json_result = await self.call_tool(
-            "youtube_json",
-            {"url": self.yt_url},
+        json_result = await self.call_tools_polite(
+            tool_name = "youtube_json",
+            args = {"url": url},
         )
         elapsed = int(time.perf_counter() - start)
-        video_id = self.get_video_id(self.yt_url)
-        json_path = base_out_dir / f"{video_id}.json"
+        video_id = self.get_video_id(url)
+        json_path = self.base_output_dir() / f"{video_id}.json"
         with open(json_path, "w", encoding="utf-8") as json_file:
             json_file.write(str(json_result.data))
         print(f"\nResult of youtube_json tool in {json_path}\n")
         print(f"The transcription of {video_id}.json "
-              f"took {str(timedelta(seconds=elapsed))}")
+                f"took {str(timedelta(seconds=elapsed))}")
 
         # youtube_text
         print(
             "\n\nExecuting 'youtube_text' tool "
-            f"with parameters {self.yt_url}",
+            f"with parameters {url}",
         )
         start = time.perf_counter()
-        text_result = await self.call_tool(
-            "youtube_text",
-            {"url": self.yt_url},
+        text_result = await self.call_tools_polite(
+            tool_name = "youtube_text",
+            args = {'url': url}
         )
         elapsed = int(time.perf_counter() - start)
-        txt_path = base_out_dir / f"{video_id}.txt"
+        txt_path = self.base_output_dir() / f"{video_id}.txt"
         with open(txt_path, "w", encoding="utf-8") as txt_file:
             txt_file.write(str(text_result.data))
         print(f"\nResult of youtube_text tool in {txt_path}")
         print(f"The transcription of {video_id}.txt "
-              f"took {str(timedelta(seconds=elapsed))}")
+                f"took {str(timedelta(seconds=elapsed))}")
+
+    async def get_all_transcripts(self) -> None:
+        """ Get transcripts for a given YouTube URL.
+                Args:
+                    yt_url: The YouTube video URL.
+        """
+        # youtube_json
+        if isinstance(self.yt_urls, List): 
+            for url in self.yt_urls:
+                await self.get_a_transcript(url)
+        else:
+            await self.get_a_transcript(self.yt_urls)
+
+    # ---------------------------------------------------------------------
+    #           YouTube Audio Transcript Methods
+    # ---------------------------------------------------------------------
+
+    async def get_token(self) -> None:
+        """ Get token for YouTube URL using token tool.
+        """
+        print(
+            "\n\nExecuting 'get_session_token' tool ",
+        )
+        try:
+            token_result = await self.call_tool(
+                "get_session_token",
+                {},
+            )
+            self.token = token_result.data
+            print(f"\nResult of get_session_token tool: {self.token}\n")
+        except Exception as e:
+            print(f"Error obtaining session token: {e}")
+            self.token = None
 
 
-
-        #           Run Audio Tools
-
-        # youtube_audio_json
+    async def get_an_audio_transcript(self, url:str)->None:
         print(
             "\n\nExecuting 'youtube_audio_json' tool "
-            f"with parameters {self.yt_url}",
+            f"to transcribe {url}",
         )
         start = time.perf_counter()
-        json_result = await self.call_tool(
-            "youtube_audio_json",
-            {"url": self.yt_url},
-        )
+        if self.token is None:
+            json_result = await self.call_tools_polite(
+                "youtube_audio_json",
+                {"url": url})
+        else:
+            json_result = await self.call_tools_polite(
+                "youtube_audio_json",
+                {"url": url, "token": self.token})
         elapsed = int(time.perf_counter() - start)
-        video_id = self.get_video_id(self.yt_url)
-        json_path = base_out_dir / f"{video_id}_audio.json"
+        # Write JSON output to file.
+        video_id = self.get_video_id(url)
+        json_path = self.base_output_dir() / f"{video_id}_audio.json"
         with open(json_path, "w", encoding="utf-8") as json_file:
             json_file.write(str(json_result.data))
         print(f"\nResult of youtube_json tool in {json_path}\n")
         print(f"The transcription of {video_id}_audio.json "
-              f"took {str(timedelta(seconds=elapsed))}")
+                f"took {str(timedelta(seconds=elapsed))}")
 
         # youtube_audio_text
         print(
             "\n\nExecuting 'youtube_audio_text' tool "
-            f"with parameters {self.yt_url}",
+            f"to transcribe {url}",
         )
         start = time.perf_counter()
-        text_result = await self.call_tool(
-            "youtube_audio_text",
-            {"url": self.yt_url},
-        )
+        if self.token is None:
+            text_result = await self.call_tools_polite(
+                "youtube_audio_text",
+                {"url": url})
+        else:
+            text_result = await self.call_tools_polite(
+                "youtube_audio_text",
+                {"url": url, "token": self.token})          
         elapsed = int(time.perf_counter() - start)
-        txt_path = base_out_dir / f"{video_id}_audio.txt"
+        # Write TXT output to file.
+        txt_path = self.base_output_dir() / f"{video_id}_audio.txt"
         with open(txt_path, "w", encoding="utf-8") as txt_file:
             txt_file.write(str(text_result.data))
         print(f"\nResult of youtube_text tool in {txt_path}")
         print(f"The transcription of {video_id}_audio.txt "
-              f"took {str(timedelta(seconds=elapsed))}")
+                f"took {str(timedelta(seconds=elapsed))}")
+
+    async def get_all_audio_transcripts(self) -> None:
+        """ Get transcripts for a given YouTube URL using various tools.
+                Args:
+                    yt_url: The YouTube video URL.
+        """
+        #           Run Audio Tools
+        await self.get_token()
+
+        # youtube_audio_json
+        if isinstance(self.yt_urls, List): 
+            for url in self.yt_urls:
+                await self.get_an_audio_transcript(url)
+        else:
+            await self.get_an_audio_transcript(self.yt_urls)
 
 # ---------------------------------------------------------------------
 #

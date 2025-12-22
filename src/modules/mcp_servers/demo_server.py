@@ -8,8 +8,10 @@
 
 import argparse
 import logging
+import time
 from pathlib import Path
 from fastmcp import FastMCP
+from ..utils.logging_config import setup_logging
 from ..utils.prompt_md_loader import register_prompts_from_markdown
 from ..utils.prompt_loader import register_prompts
 from ..utils.tool_loader import register_tools
@@ -19,13 +21,8 @@ from ..utils.long_tool_loader import register_long_tools
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # -----------------------------
 # Paths to tool, prompt, resource packages
@@ -34,6 +31,8 @@ _MODULES_DIR = Path(__file__).parents[1].resolve()
 _TOOLS_DIR = _MODULES_DIR / "tools"
 _PROMPTS_DIR = _MODULES_DIR / "prompts"
 _RESOURCES_DIR = _MODULES_DIR / "resources"
+_PROJECT_DIR = _MODULES_DIR.parents[1].resolve()
+_CACHE_DIR = _PROJECT_DIR / "Cache" 
 
 
 # -----------------------------
@@ -49,6 +48,29 @@ mcp = FastMCP(
     # strict_input_validation=False,
     include_fastmcp_meta=False,
 )
+def purge_cache(days: int = 7) -> None:
+    """ Purge transcript cache files older than `days` days.
+        Args:
+            days (int): Number of days to keep cache files. Default is 7 days.
+    """
+    # All audio files should be deleted after they are transcribed. So ony 
+    # files that are currently being transcribed or possibly failed transcriptions
+    # should be here.
+
+    cutoff = time.time() - (days * 86400)
+
+    audio_dir = _CACHE_DIR / "audio"
+    if audio_dir.exists():
+        for f in audio_dir.iterdir():
+            if f.is_file() and f.stat().mt_atime < cutoff:
+                f.unlink(missing_ok=True)
+
+    transcript_dir = _CACHE_DIR / "transcripts"
+    if transcript_dir.exists():
+        for f in transcript_dir.iterdir():
+            if f.is_file() and f.stat().mt_atime < cutoff:
+                f.unlink(missing_ok=True)
+
 
 # -----------------------------------------
 # Attach everything to FastMCP at startup
@@ -63,7 +85,7 @@ def attach_everything():
     logger.info("✅	 Tools registered.")
 
     register_long_tools(mcp, package=_TOOLS_DIR)
-    logger.info("✅	 Tools registered.")
+    logger.info("✅	 Long tools registered.")
 
     register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
     logger.info("✅	 Markdown files parsed and prompts registered.")
@@ -76,9 +98,10 @@ def launch_server(host:str="127.0.0.1", port:int=8085):
         The entry point to start the FastMCP server. 
         Launch the FastMCP server with all tools and prompts attached. 
     """
+    logger.info("✅ demo_server started.")
     attach_everything()
     mcp.run(transport="http", host=host, port=port)
-    logger.info("✅	 Server started on http://{host}:{port}")
+    logger.info("✅	 Demo Server started on http://{host}:{port}")
 
 
 # -----------------------------
@@ -101,6 +124,7 @@ def main():
         Main entry point when launched "stand alone" 
         Parse arguments and start the server. 
     """
+
     parser = argparse.ArgumentParser(description="Create and run an MCP server.")
     parser.add_argument("--host", type=str, default="127.0.0.1",
                         help="Host name or IP address (default 127.0.0.1).")

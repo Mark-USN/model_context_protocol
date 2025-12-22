@@ -21,14 +21,8 @@ T = TypeVar("T", bound=FastMCP)
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(f"{Path(__file__).stem}")
 
 _REL_PATH = Path(__file__).parents[1].resolve()
 

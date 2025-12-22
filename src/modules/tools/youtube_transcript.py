@@ -2,6 +2,7 @@
     transcripts from YouTube videos.
 """
 from __future__ import annotations
+import os
 import re
 import json
 import logging
@@ -21,13 +22,10 @@ from fastmcp import FastMCP  # pylint: disable=unused-import
 
 T = TypeVar("T", bound="FastMCP")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-logger = logging.getLogger(Path(__file__).stem)
+# -----------------------------
+# Logging setup
+# -----------------------------
+logger = logging.getLogger(__name__)
 
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
 
@@ -54,13 +52,13 @@ def get_video_id(url: str) -> str:
 
 # ----------------- Output management -----------------
 
-def _get_outputs_dir() -> Path:
-    """Base folder for project outputs (inside mymcpserver/outputs)."""
-    return Path(__file__).resolve().parents[3] / "outputs"
+def _get_cache_dir() -> Path:
+    """Base folder for project cache (inside mymcpserver/cache)."""
+    return Path(__file__).resolve().parents[3] / "cache"
 
 def _get_transcripts_dir() -> Path:
-    """Folder for transcript outputs."""
-    out_dir = _get_outputs_dir() / "transcripts"
+    """Folder for transcript cache."""
+    out_dir = _get_cache_dir() / "transcripts"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
@@ -74,7 +72,7 @@ def _get_transcript_cache_path(video_id: str) -> Path:
 def fetch_transcript(
     url: str,
     prefer_langs: Optional[List[str]] = None,
-) -> FetchedTranscript | None:
+) -> FetchedTranscript | List[Dict] | None:
     """
     Return the transcript for the YouTube video with the given URL.
     If no transcript is available, download the audio and use Whisper to transcribe it.
@@ -83,27 +81,44 @@ def fetch_transcript(
     if prefer_langs is None:
         prefer_langs = ["en", "es"]
     video_id = get_video_id(url)
-    prefer_langs = prefer_langs or ["en", "es"]
-    transcript: FetchedTranscript | Dict | None = None
+    transcript: FetchedTranscript | List[Dict] | None = None
     transcripts: List | None = None
 
+    cache_path = _get_transcript_cache_path(video_id)
+
+    # 1) If we already have a cached Whisper transcript, reuse it.
+    if cache_path.exists():
+        logger.info("✅ Using cached Whisper transcript for %s", video_id)
+        try:
+            # Touch the cache file so purge_cache() keeps it
+            with cache_path.open("r", encoding="utf-8") as f:
+                transcript = json.load(f)
+            if transcript is not None:
+                now = time.time()
+                os.utime(cache_path, (now, now))
+                return transcript
+
+        except Exception as exc:  # pragma: no cover - cache read is best-effort
+            logger.warning(
+                "⚠️ Failed to load cached transcript %s: %s; recomputing.",
+                cache_path,
+                exc,
+            )
+
     ytt_api = YouTubeTranscriptApi()
-    # 1) If no transcripts are available, see if we have a cached Whisper transcript.
+    # 2) If no transcripts are cached try and get the transcripts.
     try:
         transcripts = ytt_api.list(video_id=video_id)
     except (TranscriptsDisabled, NoTranscriptFound) as e:
         logger.info("✅ No transcripts: %s", e)
-        audio_transcript = _get_transcript_cache_path(video_id)
-        if audio_transcript.exists():
-            return audio_transcript
         return None
 
-    # 2) Transcripts are available.
+    # 3) Transcripts are available.
     # Log available languages
     langs_list = [getattr(tr, "language_code", "?") for tr in transcripts]
     logger.debug("✅ Available languages: %s", langs_list)
 
-    # 3) Try preferred languages directly (this returns the raw list[dict])
+    # 4) Try preferred languages directly (this returns the raw list[dict])
     for lang in prefer_langs:
         if lang in langs_list:
             try:
@@ -117,7 +132,7 @@ def fetch_transcript(
             except (NoTranscriptFound, TranscriptsDisabled):
                 continue
 
-        # 4) Fallback: take the *first* available Transcript and try to
+        # 5) Fallback: take the *first* available Transcript and try to
         #    translate to prefer_langs[0]
         if transcript is None:
             first_tr = next(iter(transcripts), None)
@@ -140,6 +155,20 @@ def fetch_transcript(
                         getattr(first_tr, "language_code", "?"),
                     )
                     transcript = first_tr.fetch(preserve_formatting=True)
+
+
+    # 6) Save to cache if we got a transcript.
+    if transcript is not None:
+        try:
+            with cache_path.open("w", encoding="utf-8") as f:
+                json.dump(transcript, f, ensure_ascii=False, indent=2)
+            logger.info("💾 Saved Whisper transcript cache to %s", cache_path)
+        except Exception as exc:  # pragma: no cover - cache write is best-effort
+            logger.warning(
+                "⚠️ Failed to write transcript cache %s: %s",
+                cache_path,
+                exc,
+            )
 
     return transcript
 

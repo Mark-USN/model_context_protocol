@@ -2,23 +2,24 @@
 
 import signal
 import logging
+from modules.utils.logging_config import setup_logging
 from pathlib import Path
-
 import modules.tools.youtube_transcript as yt_to_text
+import modules.mcp_servers.long_job_server as ljs
 import modules.tools.youtube_audio_transcript as yt_fm_audio
 import modules.tools.youtube_search as yt_search
 from modules.utils.api_keys import api_vault
+
+# -----------------------------
+# Logging setup
+# -----------------------------
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 def debug_stub():
     """ A simple debug stub to test importing the youtube_to_text tool.
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    logger = logging.getLogger(Path(__file__).stem)
     try:
         # api_keys = api_vault()
         # google_key = api_keys.get_value("GOOGLE_KEY")

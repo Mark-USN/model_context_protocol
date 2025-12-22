@@ -9,8 +9,8 @@ import sys
 import importlib
 import importlib.util
 import pkgutil
-import logging
 import hashlib
+import logging
 from types import ModuleType
 from typing import List, TypeVar
 from pathlib import Path
@@ -21,13 +21,7 @@ T = TypeVar("T", bound=FastMCP)
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(f"{Path(__file__).stem}")
+logger = logging.getLogger(__name__)
 
 # _REL_PATH = Path(__file__).parents[1].resolve()
 # modules/utils/tool_loader.py
@@ -146,6 +140,27 @@ def discover_tools(package: str = ".tools") -> List[ModuleType]:
     return modules
 
 
+def register_tools_in_module(mcp: T, module: ModuleType) -> None:
+    """
+    Register all tools from a specific module.
+
+    Args:
+        mcp (Any): The MCP server instance.
+        module (ModuleType): The module containing a register(mcp) method.
+    """
+    if not hasattr(module, "register"):
+        logger.warning("⚠️ Module %s has no register(mcp) function", module.__name__)
+        return
+
+    module.register(mcp)
+    logger.info("🔧 Registered tools from %s", module.__name__)
+
+    #=================================================
+    #
+    # Entry Point called by MCP server
+    #
+    #=================================================
+
 def register_tools(mcp: T, package: Path | str = "../tools") -> None:
     """
     Register all discovered tool modules with the MCP server.
@@ -179,17 +194,3 @@ def register_tools(mcp: T, package: Path | str = "../tools") -> None:
         register_tools_in_module(mcp, module)
 
 
-def register_tools_in_module(mcp: T, module: ModuleType) -> None:
-    """
-    Register all tools from a specific module.
-
-    Args:
-        mcp (Any): The MCP server instance.
-        module (ModuleType): The module containing a register(mcp) method.
-    """
-    if not hasattr(module, "register"):
-        logger.warning("⚠️ Module %s has no register(mcp) function", module.__name__)
-        return
-
-    module.register(mcp)
-    logger.info("🔧 Registered tools from %s", module.__name__)

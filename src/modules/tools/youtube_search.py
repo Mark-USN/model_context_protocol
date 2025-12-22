@@ -13,17 +13,7 @@ T = TypeVar("T", bound=FastMCP)
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
-
-api_keys = api_vault()
-        
-
+logger = logging.getLogger(__name__)
 
 def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
     """ Search YouTube for the most relevant video(s) on a given topic.
@@ -38,7 +28,9 @@ def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
     elif maxResults > 50:
         maxResults = 50
 
-    google_key = api_keys.get_value("GOOGLE_KEY")
+    google_key = ""
+    vault = api_vault()
+    google_key = vault.get_value(key="GOOGLE_KEY")
     youtube = build("youtube", "v3", developerKey=google_key)
 
     request = youtube.search().list(         # pylint: disable=no-member
@@ -78,9 +70,11 @@ def get_video_info(query:str, maxResults:int=1, order="viewCount" ):
     if order not in ["date", "rating", "relevance", "title", "videoCount"]:
         order="viewCount"
 
-    API_KEY = ""
+    google_key = ""
+    vault = api_vault()
+    google_key = vault.get_value(key="GOOGLE_KEY")
 
-    youtube = build("youtube", "v3", developerKey=API_KEY)
+    youtube = build("youtube", "v3", developerKey=google_key)
 
     request = youtube.search().list(         # pylint: disable=no-member
         part="snippet",

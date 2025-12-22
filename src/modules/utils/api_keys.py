@@ -7,13 +7,7 @@ from pathlib import Path
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+logger = logging.getLogger(__name__)
 
 
 class api_vault(object):
