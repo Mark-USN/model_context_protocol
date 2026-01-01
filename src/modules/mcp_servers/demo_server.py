@@ -21,7 +21,6 @@ from ..utils.long_tool_loader import register_long_tools
 # -----------------------------
 # Logging setup
 # -----------------------------
-setup_logging()
 logger = logging.getLogger(__name__)
 
 # -----------------------------
@@ -90,7 +89,7 @@ def attach_everything():
     register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
     logger.info("✅	 Markdown files parsed and prompts registered.")
 
-    register_prompts(mcp, package=_PROMPTS_DIR)
+    register_prompts(mcp, prompts_dir=_PROMPTS_DIR)
     logger.info("✅	 Prompt functions registered.")
 
 def launch_server(host:str="127.0.0.1", port:int=8085):
@@ -135,4 +134,9 @@ def main():
     launch_server(args.host, args.port)
 
 if __name__ == "__main__":
+    # -----------------------------
+    # Logging setup
+    # -----------------------------
+    setup_logging()
+
     main()

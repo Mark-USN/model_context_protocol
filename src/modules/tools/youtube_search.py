@@ -3,7 +3,7 @@
 
 import logging
 from typing import TypeVar
-from pathlib import Path
+# from pathlib import Path
 from fastmcp import FastMCP
 from googleapiclient.discovery import build
 from ..utils.api_keys import api_vault
@@ -68,7 +68,7 @@ def get_video_info(query:str, maxResults:int=1, order="viewCount" ):
         maxResults = 50
 
     if order not in ["date", "rating", "relevance", "title", "videoCount"]:
-        order="viewCount"
+        order="relevance"
 
     google_key = ""
     vault = api_vault()
@@ -90,8 +90,8 @@ def get_video_info(query:str, maxResults:int=1, order="viewCount" ):
 
 
 def register(mcp: T):
-    """Register math tools with MCPServer."""
-    logger.info("Registering math tools")
+    """Register youtube_search tools with MCPServer."""
+    logger.info("Registering youtube_search tools")
     mcp.tool(tags=["public", "api"])(get_most_relevant_video_url)
     mcp.tool(tags=["public", "api"])(get_video_info)
 

@@ -4,17 +4,20 @@ import re
 import json
 import logging
 import time
-import datetime
+# import datetime
 import asyncio
 import concurrent.futures
 import threading
 from pathlib import Path
-from typing import List, Dict, Optional, TypeVar
+from typing import Any, List, Dict, Optional, TypeVar
 import whisper
 from yt_dlp import YoutubeDL
+from youtube_transcript_api import FetchedTranscript
+
+
 from fastmcp import FastMCP  # pylint: disable=unused-import
 from ..utils.ffmpeg_bootstrap import ensure_ffmpeg_on_path, get_ffmpeg_binary_path
-from youtube_transcript_api import YouTubeTranscriptApi, FetchedTranscript
+# from youtube_transcript_api import YouTubeTranscriptApi, FetchedTranscript
 
 T = TypeVar("T", bound="FastMCP")
 
@@ -75,7 +78,7 @@ def _get_audio_dir() -> Path:
 
 def _get_transcript_cache_path(video_id: str) -> Path:
     """Return the path to the cached Whisper transcript JSON for this video."""
-    return _get_transcripts_dir() / f"{video_id}.whisper.json"
+    return _get_transcripts_dir() / f"{video_id}.json"
 
 # ----------------- Audio + Whisper -----------------
 
@@ -295,7 +298,7 @@ def fetch_audio_transcript(
 
     return chunks
 
-def youtube_audio_json(url: str, prefer_langs: Optional[List[str]] = None) -> str | None:
+def youtube_audio_json(url: str, prefer_langs: Optional[List[str]] = None) -> Any: # Dict | str | None:
     """
     Extracts the transcript of a YouTube video and returns the transcript
     formatted as JSON.
@@ -320,7 +323,7 @@ def youtube_audio_json(url: str, prefer_langs: Optional[List[str]] = None) -> st
     return json_transcript
 
 
-def youtube_audio_text(url: str = "", prefer_langs: List[str] = ["en", "es"]) -> str | None:
+def youtube_audio_text(url: str = "", prefer_langs: Optional[List[str]]=None) -> Any: # Dict | str | None:
     """
     Extracts the transcript of a YouTube video and returns the text.
 
@@ -592,7 +595,7 @@ def register_long(mcp: T) -> None:
     This registers ASYNC variants so the job can be cancelled while transcribing.
     The sync versions remain available for CLI/testing.
     """
-    logger.debug("✅ Registering YouTube transcript tools (async/cancellable)")
+    logger.debug("✅ Registering YouTube audio transcript tools (async/cancellable)")
     mcp.tool(tags=["public", "api"])(youtube_audio_json_async)
     mcp.tool(tags=["public", "api"])(youtube_audio_text_async)
 

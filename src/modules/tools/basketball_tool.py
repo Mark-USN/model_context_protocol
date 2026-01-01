@@ -4,8 +4,8 @@ Basketball statistics tool.
 Simulates retrieving player and team statistics.
 """
 
+# from pathlib import Path
 import logging
-from pathlib import Path
 from typing import Any, Dict, TypeVar
 from fastmcp import FastMCP
 

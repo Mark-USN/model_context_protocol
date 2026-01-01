@@ -7,7 +7,7 @@ import re
 import json
 import logging
 import time
-import datetime
+# import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, TypeVar
 from youtube_transcript_api import (
@@ -63,8 +63,33 @@ def _get_transcripts_dir() -> Path:
     return out_dir
 
 def _get_transcript_cache_path(video_id: str) -> Path:
-    """Return the path to the cached Whisper transcript JSON for this video."""
-    return _get_transcripts_dir() / f"{video_id}.whisper.json"
+    """Return the path to the cached transcript JSON for this video."""
+    return _get_transcripts_dir() / f"{video_id}.json"
+
+
+def transcript_to_list_and_cache(transcript, cache_path: Path) -> Optional[List[Dict]]:
+    """
+    Convert youtube_transcript_api transcript to list[Dict] and then JSON text,
+        best-effort cache write of JSON to cache and return list[dict] structure.
+    """
+    if transcript is None:
+        return None
+
+    # youtube_transcript_api gives list[dict] via to_raw_data(); JSON-friendly already
+    transcript_list = transcript.to_raw_data()
+
+    # Serialize ONCE; this is what we'll both save and return
+    json_text = json.dumps(transcript_list, ensure_ascii=False, indent=2)
+
+    # Best-effort cache write
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json_text, encoding="utf-8")
+        logger.info("💾 Saved transcript cache to %s", cache_path)
+    except OSError as exc:  # narrower than Exception; still “best effort”
+        logger.warning("⚠️ Failed to write transcript cache %s: %s", cache_path, exc)
+
+    return transcript_list
 
 
 # ----------------- Main Function to retrieve transcripts  -----------------
@@ -72,10 +97,9 @@ def _get_transcript_cache_path(video_id: str) -> Path:
 def fetch_transcript(
     url: str,
     prefer_langs: Optional[List[str]] = None,
-) -> FetchedTranscript | List[Dict] | None:
+) -> Optional[List[Dict]]:
     """
     Return the transcript for the YouTube video with the given URL.
-    If no transcript is available, download the audio and use Whisper to transcribe it.
     """
 
     if prefer_langs is None:
@@ -86,9 +110,9 @@ def fetch_transcript(
 
     cache_path = _get_transcript_cache_path(video_id)
 
-    # 1) If we already have a cached Whisper transcript, reuse it.
+    # 1) If we already have a cached transcript, reuse it.
     if cache_path.exists():
-        logger.info("✅ Using cached Whisper transcript for %s", video_id)
+        logger.info("✅ Using cached transcript for %s", video_id)
         try:
             # Touch the cache file so purge_cache() keeps it
             with cache_path.open("r", encoding="utf-8") as f:
@@ -156,26 +180,12 @@ def fetch_transcript(
                     )
                     transcript = first_tr.fetch(preserve_formatting=True)
 
-
-    # 6) Save to cache if we got a transcript.
-    if transcript is not None:
-        try:
-            with cache_path.open("w", encoding="utf-8") as f:
-                json.dump(transcript, f, ensure_ascii=False, indent=2)
-            logger.info("💾 Saved Whisper transcript cache to %s", cache_path)
-        except Exception as exc:  # pragma: no cover - cache write is best-effort
-            logger.warning(
-                "⚠️ Failed to write transcript cache %s: %s",
-                cache_path,
-                exc,
-            )
-
-    return transcript
+    return transcript_to_list_and_cache(transcript, cache_path)
 
 
 # ----------------- MCP TOOLS -----------------
 
-def youtube_json(url: str, prefer_langs: list[str]  = ["en", "es"]) -> str | None:
+def youtube_json(url: str, prefer_langs: Optional[list[str]]  = None) -> str | None:
     """
     Extracts the transcript of a YouTube video and returns the transcript
     formatted as JSON.
@@ -187,16 +197,12 @@ def youtube_json(url: str, prefer_langs: list[str]  = ["en", "es"]) -> str | Non
         Returns:
             The JSON format of the YouTube transcript, or None.
     """
-
-    transcript = fetch_transcript(url, prefer_langs)
-
-    if transcript is None:
-        return None
-
-    transcript_list = transcript.to_raw_data()
-
-    json_transcript = json.dumps(transcript_list, ensure_ascii=False, indent=2)
-    return json_transcript
+    if prefer_langs is None:
+        prefer_langs = ["en", "es"]
+    # youtube_transcript_api gives list[dict] via to_raw_data(); JSON-friendly already
+    transcript_list = fetch_transcript(url, prefer_langs)
+  
+    return json.dumps(transcript_list, ensure_ascii=False, indent=2) if transcript_list is not None else None
 
 
 def youtube_text(url: str, prefer_langs: Optional[List[str]] = None) -> str | None:
@@ -215,12 +221,10 @@ def youtube_text(url: str, prefer_langs: Optional[List[str]] = None) -> str | No
         prefer_langs = ["en", "es"]
 
     transcribed_text = ""
-    transcript = fetch_transcript(url, prefer_langs)
-    if transcript is None:
+    transcript_list = fetch_transcript(url, prefer_langs)
+    if transcript_list is None:
         return None
 
-    # Convert to raw data (list of dicts)
-    transcript_list = transcript.to_raw_data()
     # Combine all text snippets into a single string.
     for snippet in transcript_list:
         transcribed_text += snippet["text"] + " "

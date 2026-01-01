@@ -134,7 +134,7 @@ def discover_prompts(package: str = ".prompts") -> List[ModuleType]:
     return modules
 
 
-def register_prompts(mcp: T, package: Path | str = "..prompts") -> None:
+def register_prompts(mcp: T, prompts_dir: Path | str = "..prompts") -> None:
     """
     Register all discovered prompt modules with the MCP server.
 
@@ -143,10 +143,10 @@ def register_prompts(mcp: T, package: Path | str = "..prompts") -> None:
         package (str): Package path to scan for prompt modules.
     """
 
-    if isinstance(package, Path):
-        prompts_pkg = package
+    if isinstance(prompts_dir, Path):
+        prompts_pkg = prompts_dir
     else:
-        prompts_pkg = Path(package)
+        prompts_pkg = Path(prompts_dir)
 
     if not prompts_pkg.exists() or not prompts_pkg.is_dir():
         logger.exception("❌ Prompts directory %s does not exist or is not "
@@ -162,7 +162,7 @@ def register_prompts(mcp: T, package: Path | str = "..prompts") -> None:
 
     modules = discover_prompts(module_name)
     if not modules:
-        logger.warning("⚠️ No prompt modules found in package '%s'", package)
+        logger.warning("⚠️ No prompt modules found in package '%s'", prompts_dir)
 
     for module in modules:
         register_prompts_in_module(mcp, module)

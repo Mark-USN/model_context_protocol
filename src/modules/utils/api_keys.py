@@ -2,7 +2,7 @@
 # import os
 import dotenv
 import logging
-from pathlib import Path
+# from pathlib import Path
 
 # -----------------------------
 # Logging setup
@@ -32,5 +32,5 @@ class api_vault(object):
 
 if __name__ == "__main__":
     api = api_vault()
-    value = api.get_value("GOOGLE_KEY")
-    print(f"The value for Google_Key is: {value}")
+    key_value = api.get_value("GOOGLE_KEY")
+    print(f"The value for Google_Key is: {key_value}")
