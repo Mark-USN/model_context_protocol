@@ -2,7 +2,7 @@
 """ Math tools module for FastMCP server. """
 import logging
 from typing import TypeVar
-from pathlib import Path
+# from pathlib import Path
 from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
@@ -10,13 +10,7 @@ T = TypeVar("T", bound=FastMCP)
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+logger = logging.getLogger(__name__)
 
 
 

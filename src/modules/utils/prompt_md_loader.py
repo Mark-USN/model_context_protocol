@@ -14,8 +14,10 @@ from fastmcp import FastMCP
 
 T = TypeVar("T", bound=FastMCP)
 
-logger = logging.getLogger(Path(__file__).stem)
-
+# -----------------------------
+# Logging setup
+# -----------------------------
+logger = logging.getLogger(__name__)
 
 def _normalize_params(raw_params: Any) -> dict[str, dict[str, Any]]:
     """

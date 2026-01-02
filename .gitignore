@@ -33,7 +33,7 @@ TestResults/
 Thumbs.db
 uv.lock
 src/Reference/
-outputs/
+cache/
 mcp.pid
 mcp.log
 *.sln

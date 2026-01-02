@@ -20,29 +20,25 @@ import asyncio
 import subprocess
 import signal
 import logging
+from modules.utils.logging_config import setup_logging
 from pathlib import Path
-
-from modules.mcp_servers import demo_server
+from modules.mcp_servers import demo_server, long_job_server
 from modules.mcp_clients.universal_client import UniversalClient
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+setup_logging()
+logger = logging.getLogger(__name__)
+
 
 # -----------------------------
 # Paths (PID & LOG live next to this file)
 # -----------------------------
 SRC_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SRC_DIR.parent.resolve()
-PID_FILE = ROOT_DIR / "outputs" / "mcp.pid"
-LOG_FILE = ROOT_DIR / "outputs" / "mcp.log"
+PID_FILE = ROOT_DIR / "cache" / "mcp.pid"
+LOG_FILE = ROOT_DIR / "cache" / "mcp.log"
 
 
 # ---- Helper to find pythonw.exe on Windows ----
@@ -64,23 +60,31 @@ def _pythonw_exe():
 
 
 # ---- Background launcher (detached subprocess) ----
-def start_server(host: str, port: int, debug: bool):
+def start_server(host: str, port: int, debug: bool, mode:str):
     """ 20251101 MMH start_server
         Launches the MCP server as either a child process or as a detached process,
         depending on the debug flag. False will launch a detached process.
+        20251214 MMH: Added mode parameter to select between demo_server and long_job_server.
     """
 
     if debug:
         # Launch the server in the current process (foreground) for debugging.
-        demo_server.launch_server(host, port)
+        if mode == "server":
+            demo_server.launch_server(host, port)
+        else:
+            long_job_server.launch_server(host, port)
         return
 
     # --- Detached mode ---
     # Command line to run the server module
+
+    cmd_str = ("modules.mcp_servers.demo_server" if mode == "server" else "modules.mcp_servers.long_job_server")
+    
+
     cmd = [
         _pythonw_exe(),
         "-m",
-        "modules.mcp_servers.demo_server",
+        cmd_str,
         "--host", host,
         "--port", str(port),
     ]
@@ -108,6 +112,8 @@ def start_server(host: str, port: int, debug: bool):
 
     # Use `with` for the log file only; the server keeps running after this
     # script exits.
+    logger.info("✅ %s started (detached) on http://%s:%i.", cmd_str, host, port)
+
     with open(LOG_FILE, "a",
               buffering=1,
               encoding="utf-8",
@@ -191,12 +197,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create and run an MCP server or client."
     )
+
     parser.add_argument("--mode",
-        choices=["server", "client", "stop-server"],
+        choices=["server", "client", "stop-server","long-job-server"],
         type=str.lower,
         required=True,
-        help="Run as server, client, or stop-server."
+        help="Run as server, long_job_server, client, or stop-server."
     )
+
     parser.add_argument("--host", type=str, default="127.0.0.1",
                         help="Host name or IP address (default 127.0.0.1).")
     parser.add_argument("--port", type=port_type, default=8085,
@@ -207,9 +215,14 @@ def main():
                         "default is False")
     args = parser.parse_args()
 
+    # 20251215 MMH Show help if no arguments are given
+    if len(sys.argv) == 1:  
+        parser.print_help()
+        sys.exit(1)  # Exit with an error code
+
     if args.mode == "server":
         # Parent: launch a detached child and return immediately
-        start_server(args.host, args.port, args.debug)
+        start_server(args.host, args.port, args.debug, args.mode)
         # Parent exits now; detached child continues running.
 
     elif args.mode == "stop-server":
@@ -218,6 +231,11 @@ def main():
     elif args.mode == "client":
         client = UniversalClient(args.host, args.port)
         asyncio.run(client.run())
+    
+    elif args.mode == "long-job-server":
+        # Parent: launch a detached child and return immediately
+        start_server(args.host, args.port, args.debug, args.mode)
+        # Parent exits now; detached child continues running.
 
 
 if __name__ == "__main__":

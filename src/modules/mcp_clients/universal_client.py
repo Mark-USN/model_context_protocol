@@ -3,41 +3,46 @@
     templates, and prompts
     Based on https://gofastmcp.com/clients/client
 """
+# import json
+# from ..utils.logging_config import setup_logging
 import asyncio
 from pathlib import Path
 import re
-# import json
+import time
+import random
 import logging
-# from collections.abc import Mapping
+from typing import Any, List, Dict, Optional, TypeVar
+from datetime import timedelta
+from .youtube_demo import run_youtube_demo
+from ..utils.job_client_mixin import JobClientMixin
+from ..utils.tokens import retrieve_sid
+
 from fastmcp import Client
-# from fastmcp.client.client import CallToolResult
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+# setup_logging()
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
 # Control which examples to run
+# ---------------------------------------------------------------------
 RUN_TOOL_EXAMPLES = True
 RUN_PROMPT_EXAMPLES = False
-# ---------------------------------------------------------------------
 
-class UniversalClient(Client):
+class UniversalClient(JobClientMixin, Client):
     """ 20251003 MMH universal_client class
         A universal MCP client that connects to a FastMCP server,
         lists available tools, resources, templates, and prompts,
         and demonstrates calling some example tools.
     """
     # Variable to hold YouTube URL
-    yt_url: str = ""
     yt_search: str = ""
+    session_info: Optional[Dict[str, Any]] = None
+    MAX_SEARCH_RESULTS: int = 5
+    _next_allowed_ts: float = 0.0  # simple global limiter
+
 
     def __init__(self, host: str, port: int):
         """ 20251003 MMH universal_client __init__
@@ -46,7 +51,9 @@ class UniversalClient(Client):
         self.url = f"http://{host}:{port}/mcp"
         super().__init__(self.url)
 
-    # ----------------- Helpers -----------------
+# ---------------------------------------------------------------------
+# Helper Methods
+# ---------------------------------------------------------------------
     def get_video_id(self, url: str) -> str:
         """Extract the YouTube video ID from a URL.
             Args: url: The YouTube video URL.
@@ -65,6 +72,63 @@ class UniversalClient(Client):
         if m:
             return m.group(1)
         raise ValueError("Invalid YouTube URL")
+
+    def base_output_dir(self) -> Path:
+        """Base folder for project cache (inside mymcpserver/cache)."""
+        out_dir = Path(__file__).resolve().parents[3] / "cache" / "universal_client"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir
+
+    # ---------------------------------------------------------------------
+    # Helper Methods for Long-Running Tools
+    # ---------------------------------------------------------------------
+
+    def token(self) -> Optional[str]:
+        """Return the current session token."""
+        return self.session_info.get("token") if self.session_info else None
+
+    def session_id(self) -> Optional[str]:
+        """ Return the current session ID.
+            This is always derived from the token to avoid mix-ups or attempts to
+            use falsified session_ids.
+        """
+        # return self.session_info.get("session_id") if self.session_info else None
+        return retrieve_sid(self.token()) if self.session_info else None
+
+
+    def expires(self) -> Optional[int]:
+        return self.session_info.get("exp") if self.session_info else None
+
+    async def get_token(self, ttl: Optional[int]=None) -> None:
+        """ Get a session information which include the token session id, and 
+            experation time. Needed for calling certain tools like those related to
+            long-running jobs.
+        """
+        if ttl is not None:
+            print(f"\nRequesting session token with TTL={ttl} seconds.")   
+            args ={"ttl_s": ttl}
+        else:
+            print("\nRequesting session token with default TTL.")   
+            args ={}
+        print("\n\nExecuting 'get_session_token' tool ")
+        try:
+            token_result = await self.call_tool("get_session_token", args)
+            self.session_info = token_result.data
+            # If the tool returns a dict, pull the real token string out of it.
+            if self.session_info is not None:
+                print(f"\nResult of get_session_token tool: {self.session_info}\n"
+                      f"session_info[token] = {self.session_info.get('token')}\n")
+            else:
+                print("Error: get_session_token returned no data.")
+        except Exception as e:
+            print(f"Error obtaining session token: {e}")
+            self.session_info = None
+
+    # Long-running tool helpers are provided by JobClientMixin.
+
+# ---------------------------------------------------------------------
+# Start Client/Server Interaction
+# ---------------------------------------------------------------------
 
 
     async def run(self) -> None:
@@ -190,7 +254,7 @@ class UniversalClient(Client):
             print("\n'add' tool not available on this server.")
 
         if "youtube_text" in tool_names:
-            await self._run_youtube_demo()
+            await run_youtube_demo(self)
 
     async def _run_add_demo(self) -> None:
         """Demonstrate calling the 'add' tool."""
@@ -198,88 +262,6 @@ class UniversalClient(Client):
         result = await self.call_tool("add", {"a": 5, "b": 3})
         print(f"Result of add tool: {result}")
 
-    async def _run_youtube_demo(self) -> None:
-        """Demonstrate YouTube-related tools."""
-        import fastmcp, torch
-        import time
-        from datetime import timedelta
-        print("\n\n⚠The below information is only relevant if the client is run on the same machine as the server.")
-        print("\nfastmcp:", fastmcp.__version__)
-        print("torch:", torch.__version__)
-        print("CUDA available:", torch.cuda.is_available())
-        print("Device count:", torch.cuda.device_count())
-        print("\n")
-        
-        # Ask user for Search Term once
-        # self.yt_search = "Python programming tutorials"
-
-        while not self.yt_search:
-            self.yt_search = input("\033[1mEnter Search for YouTube: \033[0m").strip()
-            if not self.yt_search:
-                logger.warning(
-                    "⚠️ Please enter a valid search term.",
-                )
-
-        base_out_dir = (
-            Path(__file__)
-            .parents[3]
-            .resolve()
-            / "outputs"
-        )
-        base_out_dir.mkdir(parents=True, exist_ok=True)
-        
-        # youtube_search
-        print(
-            "\n\nExecuting 'get_most_relevant_video_url' tool "
-            f"with parameters {self.yt_search}",
-        )
-        yt_url_result = await self.call_tool(
-            "get_most_relevant_video_url",
-            {"query": self.yt_search},
-        )
-
-        # print(f"yt_url_result.data: \n{yt_url_result.data}\n")
-
-        # When working with LLMs result.content might be preferred.
-        self.yt_url = yt_url_result.data
-        print(f"\nMost relevant YouTube URL: {self.yt_url}")
-
-        # youtube_json
-        print(
-            "\n\nExecuting 'youtube_json' tool "
-            f"with parameters {self.yt_url}",
-        )
-        start = time.perf_counter()
-        json_result = await self.call_tool(
-            "youtube_json",
-            {"url": self.yt_url},
-        )
-        elapsed = int(time.perf_counter() - start)
-        video_id = self.get_video_id(self.yt_url)
-        json_path = base_out_dir / f"{video_id}.json"
-        with open(json_path, "w", encoding="utf-8") as json_file:
-            json_file.write(str(json_result.data))
-        print(f"\nResult of youtube_json tool in {json_path}\n")
-        print(f"The transcription of {video_id}.json "
-              f"took {str(timedelta(seconds=elapsed))}")
-
-        # youtube_text
-        print(
-            "\n\nExecuting 'youtube_text' tool "
-            f"with parameters {self.yt_url}",
-        )
-        start = time.perf_counter()
-        text_result = await self.call_tool(
-            "youtube_text",
-            {"url": self.yt_url},
-        )
-        elapsed = int(time.perf_counter() - start)
-        txt_path = base_out_dir / f"{video_id}.txt"
-        with open(txt_path, "w", encoding="utf-8") as txt_file:
-            txt_file.write(str(text_result.data))
-        print(f"\nResult of youtube_text tool in {txt_path}")
-        print(f"The transcription of {video_id}.txt "
-              f"took {str(timedelta(seconds=elapsed))}")
 # ---------------------------------------------------------------------
 #
 #           Run Example Prompts
@@ -364,4 +346,10 @@ class UniversalClient(Client):
 
 
 if __name__ == "__main__":
+    # -----------------------------
+    # Logging setup
+    # -----------------------------
+    from ..utils.logging_config import setup_logging
+    setup_logging()
+
     asyncio.run(UniversalClient("127.0.0.1", 8085).run())

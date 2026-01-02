@@ -3,7 +3,7 @@
 
 import logging
 from typing import TypeVar
-from pathlib import Path
+# from pathlib import Path
 from fastmcp import FastMCP
 from googleapiclient.discovery import build
 from ..utils.api_keys import api_vault
@@ -13,17 +13,7 @@ T = TypeVar("T", bound=FastMCP)
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
-
-api_keys = api_vault()
-        
-
+logger = logging.getLogger(__name__)
 
 def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
     """ Search YouTube for the most relevant video(s) on a given topic.
@@ -38,7 +28,9 @@ def get_most_relevant_video_url(query:str, maxResults:int=1)->str | list:
     elif maxResults > 50:
         maxResults = 50
 
-    google_key = api_keys.get_value("GOOGLE_KEY")
+    google_key = ""
+    vault = api_vault()
+    google_key = vault.get_value(key="GOOGLE_KEY")
     youtube = build("youtube", "v3", developerKey=google_key)
 
     request = youtube.search().list(         # pylint: disable=no-member
@@ -76,11 +68,13 @@ def get_video_info(query:str, maxResults:int=1, order="viewCount" ):
         maxResults = 50
 
     if order not in ["date", "rating", "relevance", "title", "videoCount"]:
-        order="viewCount"
+        order="relevance"
 
-    API_KEY = ""
+    google_key = ""
+    vault = api_vault()
+    google_key = vault.get_value(key="GOOGLE_KEY")
 
-    youtube = build("youtube", "v3", developerKey=API_KEY)
+    youtube = build("youtube", "v3", developerKey=google_key)
 
     request = youtube.search().list(         # pylint: disable=no-member
         part="snippet",
@@ -96,26 +90,29 @@ def get_video_info(query:str, maxResults:int=1, order="viewCount" ):
 
 
 def register(mcp: T):
-    """Register math tools with MCPServer."""
-    logger.info("Registering math tools")
+    """Register youtube_search tools with MCPServer."""
+    logger.info("Registering youtube_search tools")
     mcp.tool(tags=["public", "api"])(get_most_relevant_video_url)
     mcp.tool(tags=["public", "api"])(get_video_info)
 
 # ----------------- CLI -----------------
-if __name__ == "__main__":
+def main():
     """ CLI for testing the YouTube search tool. """
     # Change this to url = "" to prompt for input.
-    qry = "Python Optional Tutorial"
+    qry = "Python Modulal Tutorial"
     while not qry:
         qry = input("Enter YouTube Search query: ").strip()
         if not qry:
             logger.warning("⚠️ Please paste a valid search query.")
     try:
-        urls = get_most_relevant_video_url(qry, 50)
-        print(f"Most Relevant Youtube Videos are:\n{urls}")
-
+        # urls = get_most_relevant_video_url(qry, 10)
+        # print(f"Most Relevant Youtube Videos for \"{qry}\" are:\n")
+        # for url in urls:
+        #     print(f"- {url}")
         results = get_video_info(qry, maxResults=5, order="date")
         print(f"Video Info by date:\n{results}")
  
     except Exception as e:
         logger.error("❌ Error: %s", e)
+if __name__ == "__main__":
+    main()
