@@ -86,6 +86,7 @@ def get_job_status(job_id: str, token: str) -> Dict:
         "job_id": job.job_id,
         "state": job.state,
         "progress": job.progress,
+        "status": job.status,
         "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,

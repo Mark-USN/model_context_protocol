@@ -15,7 +15,7 @@ from ..utils.logging_config import setup_logging
 from ..utils.prompt_md_loader import register_prompts_from_markdown
 from ..utils.prompt_loader import register_prompts
 from ..utils.tool_loader import register_tools
-from ..utils.long_tool_loader import register_long_tools
+# from ..utils.long_tool_loader import register_long_tools
 
 
 # -----------------------------
@@ -83,8 +83,8 @@ def attach_everything():
     register_tools(mcp, package=_TOOLS_DIR)
     logger.info("✅	 Tools registered.")
 
-    register_long_tools(mcp, package=_TOOLS_DIR)
-    logger.info("✅	 Long tools registered.")
+    # register_long_tools(mcp, package=_TOOLS_DIR)
+    # logger.info("✅	 Long tools registered.")
 
     register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
     logger.info("✅	 Markdown files parsed and prompts registered.")

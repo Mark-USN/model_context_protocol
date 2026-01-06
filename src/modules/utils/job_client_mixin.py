@@ -43,7 +43,9 @@ class JobClientMixin:
             status = await self.call_tool("get_job_status", {"job_id": job_id, "token": token})
             s = getattr(status, "data", None) or {}
             state = s.get("state")
-
+            job = s.get("job_id")
+            progress = s.get("progress")
+            logger.info(f"Job: {job} State: {state} Progress: {progress}.")
             if state in ("done", "failed", "timed_out", "canceled"):
                 break
 

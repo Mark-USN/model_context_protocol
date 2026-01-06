@@ -6,7 +6,8 @@ Extracted from UniversalClient to keep the client class focused on MCP mechanics
 
 import time
 import logging
-from typing import List
+from typing import List, Any, Dict, Optional
+
 from datetime import timedelta
 
 logger = logging.getLogger(__name__)
@@ -43,22 +44,49 @@ async def run_youtube_demo(client) -> None:
 
     # youtube_search
     print(
-        "\n\nExecuting 'get_most_relevant_video_url' tool "
+        "\n\nExecuting 'youtube_search' tool "
         f"with parameters {client.yt_search}, {client.MAX_SEARCH_RESULTS}.",
     )
 
+
     yt_url_result = await client.call_tool(
-        "get_most_relevant_video_url",
-        {"query": client.yt_search, "maxResults": client.MAX_SEARCH_RESULTS},
+        "youtube_search",
+        {
+            "query": client.yt_search,
+            "order": "relevance",
+            "max_results": client.MAX_SEARCH_RESULTS,
+        },
     )
 
-    urls = yt_url_result.data
-    if isinstance(urls, str):
-        print(f"\nMost relevant YouTube URL: {urls}")
-    elif isinstance(urls, List):
-        print("\nMost relevant YouTube URLs:\n")
-        for url in urls:
-            print(f"- {url}")
+    payload: Dict[str, Any] = getattr(yt_url_result, "data", None) or {}
+    items: List[Dict[str, Any]] = payload.get("items") or []
+
+    urls: List[str] = []
+
+    for vid in items:
+        url = vid.get("url")
+        if url:
+            urls.append(url)
+
+        duration = vid.get("duration") or {}
+        stats = vid.get("statistics") or {}
+
+        logger.info(
+            "kinds=%s video_id=%s url=%s title=%s published=%s duration_iso=%s duration_seconds=%s "
+            "views=%s likes=%s comments=%s available=%s description=%s",
+            vid.get("kinds"),
+            vid.get("video_id"),
+            url,
+            vid.get("title"),
+            vid.get("publishedAt"),
+            duration.get("iso8601"),
+            duration.get("seconds"),
+            stats.get("views"),
+            stats.get("likes"),
+            stats.get("comments"),
+            vid.get("available"),
+            vid.get("description"),
+        )
 
     await get_all_transcripts(client, urls)
 
@@ -189,20 +217,32 @@ async def get_an_audio_text_transcript(client, url: str) -> None:
 # ---------------------------------------------------------------------
 async def get_all_transcripts(client, urls: str | List) -> None:
     """Get transcripts for a URL or list of URLs (rotates tool types)."""
-    # If a token is returned, use it in the audio tools.
-    await client.get_token()
+    if "youtube_audio_json_async" in client.get_tool_names():
+        # If a token is returned, use it in the audio tools.
+        await client.get_token()
 
-    if isinstance(urls, List):
-        for idx, url in enumerate(urls):
-            match idx % 4:
-                case 0:
-                    await get_a_json_transcript(client, url)
-                case 1:
-                    await get_an_audio_text_transcript(client, url)
-                case 2:
-                    await get_a_text_transcript(client, url)
-                case 3:
-                    await get_an_audio_json_transcript(client, url)
+        if isinstance(urls, List):
+            for idx, url in enumerate(urls):
+                match idx % 4:
+                    case 0:
+                        await get_a_json_transcript(client, url)
+                    case 1:
+                        await get_an_audio_text_transcript(client, url)
+                    case 2:
+                        await get_a_text_transcript(client, url)
+                    case 3:
+                        await get_an_audio_json_transcript(client, url)
+        else:
+            await get_a_text_transcript(client, urls)
     else:
-        await get_a_text_transcript(client, urls)
+        # No audio tools available, just cycle through the non-audio ones.
+        if isinstance(urls, List):
+            for idx, url in enumerate(urls):
+                match idx % 2:
+                    case 0:
+                        await get_a_json_transcript(client, url)
+                    case 1:
+                        await get_a_text_transcript(client, url)
+        else:
+            await get_a_text_transcript(client, urls)
 

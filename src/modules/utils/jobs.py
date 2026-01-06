@@ -47,6 +47,7 @@ class Job:
     finished_at: Optional[float] = None
     state: JobState = JobState.PENDING
     progress: float = 0.0
+    status: str = ""
     result: Optional[Any] = None
     error: Optional[str] = None
     error_type: Optional[str] = None
@@ -62,6 +63,7 @@ _JOBS: Dict[tuple[str, str], Job] = {}
 
 def jk(sid: str, jid: str) -> tuple[str, str]:
     return (sid, jid)
+
 def sweep_jobs(*, max_age_s: float = 60 * 60, keep_running: bool = False) -> int:
     """Best-effort cleanup of old jobs from the in-memory store.
 
@@ -167,6 +169,8 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     has_token = "token" in sig.parameters
     has_timeout = "timeout_s" in sig.parameters
+    has_progress_cb = "progress_cb" in sig.parameters
+
 
     # Add keyword-only token if tool doesn't already have it
     if not has_token:
@@ -174,7 +178,7 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
             inspect.Parameter(
                 "token",
                 kind=inspect.Parameter.KEYWORD_ONLY,
-                default="",
+                # default="",
                 annotation=str,
             )
         )
@@ -190,12 +194,25 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
             )
         )
 
+    if not has_progress_cb:
+        params.append(
+            inspect.Parameter(
+                "progress_cb",
+                kind=inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Any,   # IMPORTANT: schema-friendly
+            )
+        )
+
     new_sig = sig.replace(parameters=params)
 
 
 
     async def wrapper(**kwargs):
-        token = kwargs.pop("token", "")
+        # Using call_kwargs to avoid mutating kwargs directly
+        call_kwargs = dict(kwargs)
+
+        token = call_kwargs.pop("token", "")
         if not token:
             return {"error": "missing token"}
 
@@ -203,10 +220,9 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
 
         session_id = payload["sid"]
 
-        timeout_s = kwargs.pop("timeout_s", None)
+        timeout_s = call_kwargs.pop("timeout_s", None)
 
-        # if wants_session_id:
-        # kwargs.setdefault("session_id", session_id)
+        progress_cb = call_kwargs.pop("progress_cb", None)
 
         job_id = str(uuid.uuid4())
         job = Job(job_id=job_id, session_id=session_id, timeout_s=timeout_s)
@@ -217,10 +233,29 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
             job.started_at = time.time()
             job.progress = 0.01
 
+            if "progress_cb" in sig.parameters and "progress_cb" not in call_kwargs:
+                loop = asyncio.get_running_loop()
+
+                def _progress_cb(fraction: float, message: str = "") -> None:
+                    # clamp and update job.progress safely
+                    f = float(fraction)
+                    if f < 0.0:
+                        f = 0.0
+                    elif f > 1.0:
+                        f = 1.0
+
+                    # In case callback is invoked from a worker thread
+                    loop.call_soon_threadsafe(setattr, job, "progress", f)
+
+                    # Optional: if you add `job.status: str = ""` to Job dataclass:
+                    loop.call_soon_threadsafe(setattr, job, "status", message)
+
+                call_kwargs["progress_cb"] = _progress_cb
+
             if asyncio.iscoroutinefunction(fn):
-                result = await fn(**kwargs)
+                result = await fn(**call_kwargs)
             else:
-                result = await asyncio.to_thread(fn, **kwargs)
+                result = await asyncio.to_thread(fn, **call_kwargs)
 
             job.result = result
             job.progress = 1.0
@@ -229,11 +264,10 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
 
         job.task = asyncio.create_task(_run_with_timeout(job, _work()))
 
-        job_info = {"job_id": job_id, "state": job.state.value, "progress": float(job.progress)}
+        job_info = {"job_id": job_id, "state": job.state.value,
+                    "progress": float(job.progress), "status": job.status}
 
         return job_info
-
-
 
     wraps(fn)(wrapper)
 
@@ -245,6 +279,12 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     if "timeout_s" in new_sig.parameters:
         wrapper.__annotations__.setdefault("timeout_s", int | None)
+    
+    # progress_cb MUST override (never setdefault)   
+    # If a progress_cb is passed it can overwrite the Any type
+    # possibly causing mcp schema checks to fail.
+    if "progress_cb" in new_sig.parameters:
+        wrapper.__annotations__["progress_cb"] = Any
 
     # Critical: launch wrapper returns job-info dict
     wrapper.__annotations__["return"] = Dict[str, Any]
@@ -254,8 +294,9 @@ def _make_longjob_launch_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 @contextmanager
 def long_tools_require_token(mcp: FastMCP):
-    """While active, any tool registered via mcp.tool(...) will be wrapped so it
-    launches the underlying tool as a background Job and requires a keyword-only `token` argument when invoked.
+    """ While active, any tool registered via mcp.tool(...) will be wrapped so it
+        launches the underlying tool as a background Job and requires a keyword-only 
+        `token` argument when invoked.
     """
     original_tool = mcp.tool
 
