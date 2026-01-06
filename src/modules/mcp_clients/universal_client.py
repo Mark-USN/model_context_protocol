@@ -42,6 +42,8 @@ class UniversalClient(JobClientMixin, Client):
     session_info: Optional[Dict[str, Any]] = None
     MAX_SEARCH_RESULTS: int = 5
     _next_allowed_ts: float = 0.0  # simple global limiter
+    tools_list: List[str]= []
+    tool_names: set = set()
 
 
     def __init__(self, host: str, port: int):
@@ -54,6 +56,10 @@ class UniversalClient(JobClientMixin, Client):
 # ---------------------------------------------------------------------
 # Helper Methods
 # ---------------------------------------------------------------------
+    def get_tool_names(self) -> set:
+        """ Return a set of available tool names on the server. """
+        return self.tool_names
+
     def get_video_id(self, url: str) -> str:
         """Extract the YouTube video ID from a URL.
             Args: url: The YouTube video URL.
@@ -105,23 +111,23 @@ class UniversalClient(JobClientMixin, Client):
             long-running jobs.
         """
         if ttl is not None:
-            print(f"\nRequesting session token with TTL={ttl} seconds.")   
+            logger.info(f"\nRequesting session token with TTL={ttl} seconds.")   
             args ={"ttl_s": ttl}
         else:
-            print("\nRequesting session token with default TTL.")   
+            logger.info("\nRequesting session token with default TTL.")   
             args ={}
-        print("\n\nExecuting 'get_session_token' tool ")
+        logger.info("\n\nExecuting 'get_session_token' tool ")
         try:
             token_result = await self.call_tool("get_session_token", args)
             self.session_info = token_result.data
             # If the tool returns a dict, pull the real token string out of it.
             if self.session_info is not None:
-                print(f"\nResult of get_session_token tool: {self.session_info}\n"
+                logger.info(f"\nResult of get_session_token tool: {self.session_info}\n"
                       f"session_info[token] = {self.session_info.get('token')}\n")
             else:
-                print("Error: get_session_token returned no data.")
+                logger.info("Error: get_session_token returned no data.")
         except Exception as e:
-            print(f"Error obtaining session token: {e}")
+            logger.info(f"Error obtaining session token: {e}")
             self.session_info = None
 
     # Long-running tool helpers are provided by JobClientMixin.
@@ -141,21 +147,23 @@ class UniversalClient(JobClientMixin, Client):
             await self.ping()
 
             # List available tools, resources, templates, and prompts
-            tools = await self.list_tools()
-            self._show_tools(tools)
+            self.tools_list = await self.list_tools()
+            self.tool_names = {tool.name for tool in self.tools_list}
+            self._show_tools(self.tools_list)
 
-            resources = await self.list_resources()
-            self._show_resources(resources)
+            # resources = await self.list_resources()
+            # self._show_resources(resources)
 
-            templates = await self.list_resource_templates()
-            self._show_templates(templates)
+            # templates = await self.list_resource_templates()
+            # self._show_templates(templates)
 
-            prompts = await self.list_prompts()
-            self._show_prompts(prompts)
+            prompts = None
+            # prompts = await self.list_prompts()
+            # self._show_prompts(prompts)
 
             if RUN_TOOL_EXAMPLES:
                 # Execute example tools
-                await self._run_example_tools(tools)
+                await self._run_example_tools(self.tools_list)
 
             if RUN_PROMPT_EXAMPLES:
                 # Execute example prompts
@@ -169,75 +177,71 @@ class UniversalClient(JobClientMixin, Client):
 
     def _show_tools(self, tools) -> None:
         """Print available tools."""
-        print(
+        logger.info(
             "\nNo Tools available.\n"
             if not tools
             else "\nAvailable Tools:\n",
         )
         for tool in tools:
-            print(f"Tool: {tool.name}")
-            print(f"Description: {tool.description}")
+            logger.info(f"Tool: {tool.name}")
+            logger.info(f"Description: {tool.description}")
             if tool.inputSchema:
-                print(f"Parameters: {tool.inputSchema}")
+                logger.info(f"Parameters: {tool.inputSchema}")
             # Access tags and other metadata
             # if hasattr(tool, 'meta') and tool.meta:
             #     fastmcp_meta = tool.meta.get('_fastmcp', {})
-            #     print(f"Tags: {fastmcp_meta.get('tags', [])}")
-            print("")
+            #     logger.info(f"Tags: {fastmcp_meta.get('tags', [])}")
 
     def _show_resources(self, resources) -> None:
         """Print available resources."""
-        print(
+        logger.info(
             "\nNo Resources available.\n"
             if not resources
             else "\nAvailable Resources:\n",
         )
         for resource in resources:
-            print(f"Resource URI: {resource.uri}")
-            print(f"Name: {resource.name}")
-            print(f"Description: {resource.description}")
-            print(f"MIME Type: {resource.mimeType}")
+            logger.info(f"Resource URI: {resource.uri}")
+            logger.info(f"Name: {resource.name}")
+            logger.info(f"Description: {resource.description}")
+            logger.info(f"MIME Type: {resource.mimeType}")
             # Access tags and other metadata
             # if hasattr(resource, '_meta') and resource._meta:
             #     fastmcp_meta = resource._meta.get('_fastmcp', {})
-            #     print(f"Tags: {fastmcp_meta.get('tags', [])}")
-            print("")
+            #     logger.info(f"Tags: {fastmcp_meta.get('tags', [])}")
 
     def _show_templates(self, templates) -> None:
         """Print available resource templates."""
-        print(
+        logger.info(
             "\nNo Resource Templates available.\n"
             if not templates
             else "\nAvailable Resource Templates:\n",
         )
         for template in templates:
-            print(f"Template URI: {template.uriTemplate}")
-            print(f"Name: {template.name}")
-            print(f"Description: {template.description}")
+            logger.info(f"Template URI: {template.uriTemplate}")
+            logger.info(f"Name: {template.name}")
+            logger.info(f"Description: {template.description}")
             # Access tags and other metadata
             # if hasattr(template, '_meta') and template._meta:
             #     fastmcp_meta = template._meta.get('_fastmcp', {})
-            #     print(f"Tags: {fastmcp_meta.get('tags', [])}")
-            print("")
+            #     logger.info(f"Tags: {fastmcp_meta.get('tags', [])}")
 
     def _show_prompts(self, prompts) -> None:
         """Print available prompts."""
-        print(
+        logger.info(
             "\nNo Prompts available.\n"
             if not prompts
             else "\nAvailable Prompts:\n",
         )
         for prompt in prompts:
-            print(f"Prompt: {prompt.name}")
-            print(f"Description: {prompt.description}")
+            logger.info(f"Prompt: {prompt.name}")
+            logger.info(f"Description: {prompt.description}")
             if prompt.arguments:
                 arg_names = [arg.name for arg in prompt.arguments]
-                print(f"Arguments: {arg_names}")
+                logger.info(f"Arguments: {arg_names}")
             # Access tags and other metadata
             # if hasattr(prompt, '_meta') and prompt._meta:
             #     fastmcp_meta = prompt._meta.get('_fastmcp', {})
-            #     print(f"Tags: {fastmcp_meta.get('tags', [])}")
-            print("")
+            #     logger.info(f"Tags: {fastmcp_meta.get('tags', [])}")
 
 # ---------------------------------------------------------------------
 #
@@ -246,21 +250,20 @@ class UniversalClient(JobClientMixin, Client):
 # ---------------------------------------------------------------------
     async def _run_example_tools(self, tools) -> None:
         """Run example tool invocations where available."""
-        tool_names = {tool.name for tool in tools}
 
-        if "add" in tool_names:
-            await self._run_add_demo()
-        else:
-            print("\n'add' tool not available on this server.")
+        # if "add" in tool_names:
+        #     await self._run_add_demo()
+        # else:
+        #     logger.info("\n'add' tool not available on this server.")
 
-        if "youtube_text" in tool_names:
+        if "youtube_text" in self.tool_names:
             await run_youtube_demo(self)
 
     async def _run_add_demo(self) -> None:
         """Demonstrate calling the 'add' tool."""
-        print("\n\nExecuting 'add' tool with parameters a=5, b=3")
+        logger.info("\n\nExecuting 'add' tool with parameters a=5, b=3")
         result = await self.call_tool("add", {"a": 5, "b": 3})
-        print(f"Result of add tool: {result}")
+        logger.info(f"Result of add tool: {result}")
 
 # ---------------------------------------------------------------------
 #
@@ -275,74 +278,74 @@ class UniversalClient(JobClientMixin, Client):
         if "summarize_text" in prompt_names:
             await self._run_summarize_text_demo()
         else:
-            print("\n'summarize_text' prompt not available on this server.")
+            logger.info("\n'summarize_text' prompt not available on this server.")
 
         if "ask_about_topic" in prompt_names:
             await self._run_ask_about_topic_demo()
         else:
-            print("\n'ask_about_topic' prompt not available on this server.")
+            logger.info("\n'ask_about_topic' prompt not available on this server.")
 
         if "generate_code_request" in prompt_names:
             await self._run_generate_code_request_demo()
         else:
-            print("\n'generate_code_request' prompt not available on this server.")
+            logger.info("\n'generate_code_request' prompt not available on this server.")
 
         if "roleplay_scenario" in prompt_names:
             await self._run_roleplay_scenario_demo()
         else:
-            print("\n'roleplay_scenario' prompt not available on this server.")
+            logger.info("\n'roleplay_scenario' prompt not available on this server.")
 
     async def _run_summarize_text_demo(self) -> None:
         """Demonstrate calling the 'summarize_text' prompt."""
-        print("\n\nExecuting 'summarize_text' prompt with parameters "
+        logger.info("\n\nExecuting 'summarize_text' prompt with parameters "
               "topic=Dogbert Characteristics, lang=en")
         result = await self.get_prompt("summarize_text",
                             {"text": "Dogbert Characteristics", "lang":"en"})
-        print(f"Result of summarize_text Prompt: {result}")
+        logger.info(f"Result of summarize_text Prompt: {result}")
         # Access the personalized messages
-        print("\nPersonalized Messages:")
+        logger.info("\nPersonalized Messages:")
         for message in result.messages:
-            print(f"Generated message: {message.content}")
+            logger.info(f"Generated message: {message.content}")
 
 
     async def _run_ask_about_topic_demo(self) -> None:
         """Demonstrate calling the 'ask_about_topic' prompt."""
-        print("\n\nExecuting 'ask_about_topic' prompt with parameters "
+        logger.info("\n\nExecuting 'ask_about_topic' prompt with parameters "
               "topic=Dogbert Characteristics")
         result = await self.get_prompt("ask_about_topic",
                             {"topic": "Dogbert Characteristics"})
-        print(f"Result of ask_about_topic Prompt: {result}")
+        logger.info(f"Result of ask_about_topic Prompt: {result}")
         # Access the personalized messages
-        print("\nPersonalized Messages:")
+        logger.info("\nPersonalized Messages:")
         for message in result.messages:
-            print(f"Generated message: {message.content}")
+            logger.info(f"Generated message: {message.content}")
 
     async def _run_generate_code_request_demo(self) -> None:
         """Demonstrate calling the 'generate_code_request' prompt."""
-        print("\n\nExecuting 'generate_code_request' prompt with parameters "
+        logger.info("\n\nExecuting 'generate_code_request' prompt with parameters "
               "language=assembly, task_description= build windows operating system")
         result = await self.get_prompt("generate_code_request",
                             {"language": "assembly",
                              "task_description":"build windows operating system"})
-        print(f"Result of generate_code_request Prompt: {result}")
+        logger.info(f"Result of generate_code_request Prompt: {result}")
         # Access the personalized messages
-        print("\nPersonalized Messages:")
+        logger.info("\nPersonalized Messages:")
         for message in result.messages:
-            print(f"Generated message: {message.content}")
+            logger.info(f"Generated message: {message.content}")
 
 
     async def _run_roleplay_scenario_demo(self) -> None:
         """Demonstrate calling the 'roleplay_scenario' prompt."""
-        print("\n\nExecuting 'roleplay_scenario' prompt with parameters "
+        logger.info("\n\nExecuting 'roleplay_scenario' prompt with parameters "
               "character=Roger Rabbit, situation= The real world")
         result = await self.get_prompt("roleplay_scenario",
                             {"character": "Roger Rabbit",
                              "situation":"The real world"})
-        print(f"Result of roleplay_scenario Prompt: {result}")
+        logger.info(f"Result of roleplay_scenario Prompt: {result}")
         # Access the personalized messages
-        print("\nPersonalized Messages:")
+        logger.info("\nPersonalized Messages:")
         for message in result.messages:
-            print(f"Generated message: {message.content}")
+            logger.info(f"Generated message: {message.content}")
 
 
 if __name__ == "__main__":

@@ -1,20 +1,20 @@
 ﻿from __future__ import annotations
+# import datetime
 import os
 import re
 import json
 import logging
 import time
-# import datetime
+import whisper
 import asyncio
 import concurrent.futures
 import threading
 from pathlib import Path
-from typing import Any, List, Dict, Optional, TypeVar
-import whisper
+from typing import Any, Tuple, List, Dict, Optional, TypeVar
 from yt_dlp import YoutubeDL
 from youtube_transcript_api import FetchedTranscript
-
-
+from dataclasses import dataclass
+from collections.abc import Callable
 from fastmcp import FastMCP  # pylint: disable=unused-import
 from ..utils.ffmpeg_bootstrap import ensure_ffmpeg_on_path, get_ffmpeg_binary_path
 # from youtube_transcript_api import YouTubeTranscriptApi, FetchedTranscript
@@ -27,6 +27,8 @@ T = TypeVar("T", bound="FastMCP")
 logger = logging.getLogger(__name__)
 
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
+
+ProgressCallback = Callable[[float, str], None]
 
 # ----------------- Whisper chunking configuration -----------------
 # Duration (in seconds) for each Whisper chunk
@@ -131,16 +133,20 @@ def download_audio(url: str, video_id: str) -> Path:
 # SYNC (blocking) SECTION
 # =========================
 
-def transcribe_with_whisper(
+async def transcribe_with_whisper(
     audio_path: Path,
     model_name: str = "small",
     chunk_duration: float = CHUNK_DURATION_SECONDS,
     overlap: float = CHUNK_OVERLAP_SECONDS,
+    *,
+    yield_every_n_chunks: int = 1,
+    progress_cb: ProgressCallback | None = None,
 ) -> Optional[List[Dict]]:
     """Transcribe an audio file using OpenAI Whisper in overlapping chunks.
 
-    NOTE: This is a *blocking* implementation. For MCP server responsiveness and
-    cancellation support, see `transcribe_with_whisper_async()` below.
+    NOTE: This is an *async* implementation to support:
+      - progress reporting (progress_cb)
+      - cooperative cancellation (yielding to the event loop)
 
     The audio is split into chunks of `chunk_duration` seconds with `overlap`
     seconds of overlap between consecutive chunks. Each chunk is fed to Whisper,
@@ -151,24 +157,36 @@ def transcribe_with_whisper(
         model_name: Whisper model name to use (default: "small").
         chunk_duration: Duration (in seconds) of each chunk (default: 30.0).
         overlap: Overlap (in seconds) between chunks (default: 5.0).
+        yield_every_n_chunks: Yield to loop every N chunks (default: 1).
+        progress_cb: Optional callback(progress_fraction, message).
 
     Returns:
         A list of Whisper chunk dicts, or None if transcription fails.
     """
     logger.info(
-        "🎧 Transcribing %s with Whisper model '%s' in %.1fs chunks (overlap %.1fs)",
+        "🎧 (async) Transcribing %s with Whisper model '%s' in %.1fs chunks (overlap %.1fs)",
         audio_path,
         model_name,
         chunk_duration,
         overlap,
     )
 
-    # Load the model once
-    model = whisper.load_model(model_name)
-
     # Load and resample audio to 16 kHz mono using Whisper's helper
     audio = whisper.load_audio(str(audio_path))
     sample_rate = 16000  # Whisper.load_audio resamples to 16k internally
+    num_samples = int(audio.shape[0])
+
+    # progress helper (sample-based so last partial chunk is accurate)
+    prog = make_sample_progress_fn(num_samples)
+
+    def report(processed_samples: int, phase: str) -> None:
+        if not progress_cb:
+            return
+        info = prog(processed_samples, phase=phase)
+        progress_cb(info.fraction, info.message)
+
+    # Initial status
+    report(0, "loading")
 
     samples_per_chunk = int(chunk_duration * sample_rate)
     overlap_samples = int(overlap * sample_rate)
@@ -192,45 +210,54 @@ def transcribe_with_whisper(
 
     chunks: List[Dict] = []
     chunk_index = 0
-    num_samples = audio.shape[0]
 
-    for start_sample in range(0, num_samples, step):
-        end_sample = start_sample + samples_per_chunk
-        segment_audio = audio[start_sample:end_sample]
+    # Dedicated single worker thread: keeps Whisper execution pinned to one thread
+    # and avoids thread-hopping issues.
+    loop = asyncio.get_running_loop()
 
-        if segment_audio.size == 0:
-            break
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper") as ex:
+            for start_sample in range(0, num_samples, step):
+                # Cooperative cancellation point
+                if yield_every_n_chunks > 0 and (chunk_index % yield_every_n_chunks) == 0:
+                    await asyncio.sleep(0)
 
-        # Approximate times in seconds for this chunk
-        start_time = start_sample / sample_rate
-        end_time = min(num_samples, end_sample) / sample_rate
+                end_sample = min(start_sample + samples_per_chunk, num_samples)
+                segment_audio = audio[start_sample:end_sample]
+                if segment_audio.size == 0:
+                    break
 
-        logger.debug(
-            "🧩 Chunk %d: samples [%d:%d] -> time [%.2f, %.2f]s",
-            chunk_index,
-            start_sample,
-            end_sample,
-            start_time,
-            end_time,
-        )
+                report(start_sample, f"transcribing chunk {chunk_index}")
 
-        # Whisper expects audio array; whisper.transcribe runs the model.
-        chunk = whisper.transcribe(model, segment_audio)
-        chunks.append(chunk)
-        chunk_index += 1
+                try:
+                    chunk = await loop.run_in_executor(
+                        ex, _transcribe_chunk_in_worker_thread, model_name, segment_audio
+                    )
+                except asyncio.CancelledError:
+                    logger.info("🛑 Transcription cancelled during chunk %d.", chunk_index)
+                    raise
 
-        if end_sample >= num_samples:
-            break
+                chunks.append(chunk)
+                chunk_index += 1
 
-    # Done with the audio file
-    audio_path.unlink(missing_ok=True)
-    return chunks
+                # We have processed up through end_sample
+                report(end_sample, f"completed chunk {chunk_index}")
 
+                if end_sample >= num_samples:
+                    break
+
+        report(num_samples, "done")
+        return chunks
+
+    finally:
+        # Always runs: success, exception, or CancelledError
+        audio_path.unlink(missing_ok=True)
 
 
 def fetch_audio_transcript(
     url: str,
     prefer_langs: Optional[List[str]] = None,
+    progress_cb: ProgressCallback | None = None,
 ) -> FetchedTranscript | List[Dict] | None:
     """Download audio from YouTube and transcribe it with Whisper, with caching.
 
@@ -272,8 +299,13 @@ def fetch_audio_transcript(
     ffmpeg_dir = ensure_ffmpeg_on_path()
     logger.info("✅ Using ffmpeg from: %s", ffmpeg_dir)
 
-    chunks: List[Dict] = []
+    if progress_cb:
+        progress_cb(0.02, "downloading audio")
     audio_path = download_audio(url, video_id)
+    if progress_cb:
+        progress_cb(0.05, "audio downloaded")
+
+    chunks: List[Dict] = []
     chunks = transcribe_with_whisper(
         audio_path,
         # 20251130 MMH Changed from "base" to "small" gives better transcripts
@@ -281,6 +313,7 @@ def fetch_audio_transcript(
         model_name="small",
         chunk_duration=CHUNK_DURATION_SECONDS,
         overlap=CHUNK_OVERLAP_SECONDS,
+        progress_cb=(lambda f, msg: progress_cb(0.05 + 0.95 * f, msg)) if progress_cb else None,
     )
 
     # 3) Save to cache if we got a transcript.
@@ -298,7 +331,12 @@ def fetch_audio_transcript(
 
     return chunks
 
-def youtube_audio_json(url: str, prefer_langs: Optional[List[str]] = None) -> Any: # Dict | str | None:
+def youtube_audio_json(
+        url: str,
+        prefer_langs: Optional[List[str]] = None,
+        *,
+        progress_cb: Any = None,
+    ) -> str | None:
     """
     Extracts the transcript of a YouTube video and returns the transcript
     formatted as JSON.
@@ -311,10 +349,12 @@ def youtube_audio_json(url: str, prefer_langs: Optional[List[str]] = None) -> An
             The JSON format of the YouTube transcript, or None.
     """
 
+    cb: ProgressCallback | None = progress_cb if callable(progress_cb) else None
+
     if prefer_langs is None:
         prefer_langs = ["en", "es"]
 
-    transcript_list = fetch_audio_transcript(url, prefer_langs)
+    transcript_list = fetch_audio_transcript(url, prefer_langs, progress_cb=cb)
 
     if transcript_list is None:
         return None
@@ -323,7 +363,12 @@ def youtube_audio_json(url: str, prefer_langs: Optional[List[str]] = None) -> An
     return json_transcript
 
 
-def youtube_audio_text(url: str = "", prefer_langs: Optional[List[str]]=None) -> Any: # Dict | str | None:
+def youtube_audio_text(
+        url: str,
+        prefer_langs: Optional[List[str]] = None,
+        *,
+        progress_cb: Any = None,
+    ) -> str | None:
     """
     Extracts the transcript of a YouTube video and returns the text.
 
@@ -335,11 +380,13 @@ def youtube_audio_text(url: str = "", prefer_langs: Optional[List[str]]=None) ->
             The text of the YouTube transcript, or None.
     """
 
+    cb: ProgressCallback | None = progress_cb if callable(progress_cb) else None
+
     if prefer_langs is None:
         prefer_langs = ["en", "es"]
 
     transcribed_text = ""
-    transcript_list = fetch_audio_transcript(url, prefer_langs)
+    transcript_list = fetch_audio_transcript(url, prefer_langs, progress_cb=cb)
     if transcript_list is None:
         return None
 
@@ -385,6 +432,27 @@ def _transcribe_chunk_in_worker_thread(model_name: str, segment_audio):
     model = _get_thread_local_whisper_model(model_name)
     return whisper.transcribe(model, segment_audio)
 
+
+@dataclass
+class ProgressInfo:
+    fraction: float          # 0.0 .. 1.0
+    message: str = ""        # optional human-readable status
+
+
+def make_sample_progress_fn(num_samples: int) -> Callable[[int, int, str], ProgressInfo]:
+    """
+    Returns a function that converts (processed_samples, total_samples, phase) into ProgressInfo.
+    Uses samples, not chunk count, so it stays accurate even for a partial last chunk.
+    """
+    total = max(1, int(num_samples))
+
+    def _progress(processed_samples: int, total_samples: int = total, phase: str = "") -> ProgressInfo:
+        done = min(max(int(processed_samples), 0), total_samples)
+        frac = done / total_samples
+        return ProgressInfo(frac, f"{phase} {frac*100:.1f}%".strip())
+
+    return _progress
+
 async def transcribe_with_whisper_async(
     audio_path: Path,
     model_name: str = "small",
@@ -392,6 +460,7 @@ async def transcribe_with_whisper_async(
     overlap: float = CHUNK_OVERLAP_SECONDS,
     *,
     yield_every_n_chunks: int = 1,
+    progress_cb: Optional[ProgressCallback] = None,
 ) -> Optional[List[Dict]]:
     """Async/transcribable variant of `transcribe_with_whisper`.
 
@@ -422,6 +491,7 @@ async def transcribe_with_whisper_async(
 
     samples_per_chunk = int(chunk_duration * sample_rate)
     overlap_samples = int(overlap * sample_rate)
+    num_samples = audio.shape[0]
 
     if samples_per_chunk <= 0:
         raise ValueError("chunk_duration must be > 0")
@@ -440,64 +510,82 @@ async def transcribe_with_whisper_async(
 
     chunks: List[Dict] = []
     chunk_index = 0
-    num_samples = audio.shape[0]
+
+    # progress fn based on samples:
+    prog = make_sample_progress_fn(num_samples)
+
+
+    def report(processed_samples: int, phase: str):
+        if progress_cb:
+            info = prog(processed_samples, num_samples, phase)
+            progress_cb(info.fraction, info.message)
+
+    report(0, "loading")
+
 
     # Dedicated single worker thread: keeps model pinned to one thread and avoids
     # 'random thread' issues that can happen if the default threadpool hops threads.
-    loop = asyncio.get_running_loop()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper") as ex:
-        for start_sample in range(0, num_samples, step):
-            # Checkpoint: if the caller cancelled, this is where CancelledError lands.
-            if yield_every_n_chunks > 0 and (chunk_index % yield_every_n_chunks) == 0:
-                await asyncio.sleep(0)
+    try:
+        loop = asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper") as ex:
+            for start_sample in range(0, num_samples, step):
+                # Checkpoint: if the caller cancelled, this is where CancelledError lands.
+                if yield_every_n_chunks > 0 and (chunk_index % yield_every_n_chunks) == 0:
+                    await asyncio.sleep(0)
 
-            end_sample = start_sample + samples_per_chunk
-            segment_audio = audio[start_sample:end_sample]
+                end_sample = min(start_sample + samples_per_chunk, num_samples)
+                segment_audio = audio[start_sample:end_sample]
 
-            if segment_audio.size == 0:
-                break
+                if segment_audio.size == 0:
+                    break
+                report(start_sample, f"transcribing chunk {chunk_index}")
 
-            start_time = start_sample / sample_rate
-            end_time = min(num_samples, end_sample) / sample_rate
+                start_time = start_sample / sample_rate
+                end_time = min(num_samples, end_sample) / sample_rate
 
-            logger.debug(
-                "🧩 (async) Chunk %d: samples [%d:%d] -> time [%.2f, %.2f]s",
-                chunk_index,
-                start_sample,
-                end_sample,
-                start_time,
-                end_time,
-            )
-
-            try:
-                chunk = await loop.run_in_executor(
-                    ex, _transcribe_chunk_in_worker_thread, model_name, segment_audio
+                logger.debug(
+                    "🧩 (async) Chunk %d: samples [%d:%d] -> time [%.2f, %.2f]s",
+                    chunk_index,
+                    start_sample,
+                    end_sample,
+                    start_time,
+                    end_time,
                 )
-            except asyncio.CancelledError:
-                # Best effort cleanup; note: a chunk already running in the worker
-                # thread will still run to completion, but we stop awaiting more work.
-                logger.info("🛑 Transcription cancelled during chunk %d.", chunk_index)
-                raise
 
-            chunks.append(chunk)
-            chunk_index += 1
+                try:
+                    chunk = await loop.run_in_executor(
+                        ex, _transcribe_chunk_in_worker_thread, model_name, segment_audio
+                    )
+                except asyncio.CancelledError:
+                    # Best effort cleanup; note: a chunk already running in the worker
+                    # thread will still run to completion, but we stop awaiting more work.
+                    logger.info("🛑 Transcription cancelled during chunk %d.", chunk_index)
+                    raise
 
-            if end_sample >= num_samples:
-                break
+                chunks.append(chunk)
+                chunk_index += 1
 
-    audio_path.unlink(missing_ok=True)
-    return chunks
+                # after finishing this chunk, we’ve processed up through end_sample
+                report(end_sample, f"completed chunk {chunk_index-1}")
+
+                if end_sample >= num_samples:
+                    break
+            report(num_samples, "done")
+        return chunks
+    finally:
+        audio_path.unlink(missing_ok=True)
 
 
 
 async def fetch_audio_transcript_async(
-    url: str,
-    prefer_langs: Optional[List[str]] = None,
-    *,
-    model_name: str = "small",
-    chunk_duration: float = CHUNK_DURATION_SECONDS,
-    overlap: float = CHUNK_OVERLAP_SECONDS,
-) -> Optional[List[Dict]]:
+        url: str,
+        prefer_langs: Optional[List[str]] = None,
+        *,
+        model_name: str = "small",
+        chunk_duration: float = CHUNK_DURATION_SECONDS,
+        overlap: float = CHUNK_OVERLAP_SECONDS,
+        progress_cb: Optional[ProgressCallback] = None, 
+    ) -> Optional[List[Dict]]:
     """Async wrapper around `fetch_audio_transcript` with cooperative cancellation.
 
     Major differences from the sync version:
@@ -512,17 +600,26 @@ async def fetch_audio_transcript_async(
     if prefer_langs is None:
         prefer_langs = ["en", "es"]
 
+    if progress_cb:
+        progress_cb(0.0, "starting")
+
     video_id = get_video_id(url)
     cache_path = _get_transcript_cache_path(video_id)
 
     if cache_path.exists():
         logger.info("✅ Using cached Whisper transcript for %s", video_id)
         try:
-            return json.loads(cache_path.read_text(encoding="utf-8"))
+            transcript = json.loads(cache_path.read_text(encoding="utf-8"))
+            if progress_cb:
+                progress_cb(1.0, "finished")
+            return transcript
         except Exception as exc:  # pragma: no cover
             logger.warning("⚠️ Failed to load cached transcript %s: %s; recomputing.", cache_path, exc)
 
     # Ensure ffmpeg on PATH
+    if progress_cb:
+        progress_cb(0.01, "downloading audio")
+
     ffmpeg_dir = ensure_ffmpeg_on_path()
     logger.info("✅ Using ffmpeg from: %s", ffmpeg_dir)
 
@@ -535,17 +632,20 @@ async def fetch_audio_transcript_async(
 
     # Yield after download so cancellation can be observed immediately.
     await asyncio.sleep(0)
+    if progress_cb:
+        progress_cb(0.05, "audio downloaded")
 
     # Transcribe with cooperative cancellation
     chunks: Optional[List[Dict]] = None
     try:
         chunks = await transcribe_with_whisper_async(
-            audio_path,
-            model_name=model_name,
-            chunk_duration=chunk_duration,
-            overlap=overlap,
-            yield_every_n_chunks=1,
-        )
+                audio_path,
+                model_name=model_name,
+                chunk_duration=chunk_duration,
+                overlap=overlap,
+                yield_every_n_chunks=1,
+                progress_cb=lambda frac, msg: progress_cb(0.05 + 0.95 * frac, msg) if progress_cb else None,
+            )
     except asyncio.CancelledError:
         # If cancelled, best effort cleanup of the downloaded audio file
         audio_path.unlink(missing_ok=True)
@@ -559,21 +659,38 @@ async def fetch_audio_transcript_async(
             logger.info("💾 Saved Whisper transcript cache to %s", cache_path)
         except Exception as exc:  # pragma: no cover
             logger.warning("⚠️ Failed to write transcript cache %s: %s", cache_path, exc)
+    if progress_cb:
+        progress_cb(1.0, "finished")
 
     return chunks
 
 
-async def youtube_audio_json_async(url: str, prefer_langs: Optional[List[str]] = None) -> str | None:
+async def youtube_audio_json_async(url: str,
+                                   prefer_langs: Optional[List[str]] = None,
+                                   *,
+                                   progress_cb: Any = None,
+                                   ) -> str | None:
     """Async version of youtube_audio_json (supports cooperative cancellation)."""
-    chunks = await fetch_audio_transcript_async(url, prefer_langs)
+
+    cb = progress_cb if callable(progress_cb) else None
+
+    chunks = await fetch_audio_transcript_async(url, prefer_langs, progress_cb=cb)
     if chunks is None:
         return None
     return json.dumps(chunks, ensure_ascii=False, indent=2)
 
 
-async def youtube_audio_text_async(url: str, prefer_langs: Optional[List[str]] = None) -> str | None:
+async def youtube_audio_text_async(url: str,
+                                   prefer_langs: Optional[List[str]] = None,
+                                   *,
+                                   progress_cb: Any = None,
+                                   ) -> str | None:
+
     """Async version of youtube_audio_text (supports cooperative cancellation)."""
-    chunks = await fetch_audio_transcript_async(url, prefer_langs)
+
+    cb = progress_cb if callable(progress_cb) else None
+
+    chunks = await fetch_audio_transcript_async(url, prefer_langs, progress_cb=cb)
     if chunks is None:
         return None
     # Same logic as youtube_audio_text: join segment texts
