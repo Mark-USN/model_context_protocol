@@ -1,54 +1,159 @@
-"""
-YouTube search + metadata tools (playlist-aware).
+﻿"""
+YouTube search + metadata tools (playlist-aware; playlist expansion is opt-in).
 
-Tools:
-  - youtube_search: search for videos and/or playlists; returns full metadata for videos
-  - youtube_video_info: metadata for one or many video IDs/URLs
-  - youtube_playlist_videos: expand a playlist ID/URL into per-video metadata (same schema as search videos)
+CHANGES (per your 3 requests)
+1) Playlist expansion is now a separate tool:
+   - youtube_playlist_info(): playlist metadata ONLY (cheap-ish)
+   - youtube_playlist_video_list(): playlistItems + videos.list enrichment (potentially expensive)
+   The restored helper you added has been cleaned up and kept as:
+     youtube_get_playlist_videos()
 
-Notes:
-  - search.list is lightweight and does NOT include duration/stats; we batch videos.list for all videoIds.
-  - videos.list accepts up to 50 IDs per call; playlistItems.list is paged (50 per page).
+2) Python 3.12+ recommendations:
+   - Built-in generics: list[str], dict[str, Any]
+   - `|` unions
+   - collections.abc Mapping / Iterable
+   - Minimize `typing` imports (only Any + Annotated)
+
+3) youtube_playlist_info() signature:
+   - playlist: str | list[str]
+   (Removed Mapping[str, Any] options as requested.)
+
+Source baseline: /mnt/data/youtube_search.py :contentReference[oaicite:0]{index=0}
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from collections.abc import Iterable, Mapping
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Tuple, TypeVar, Annotated
+from typing import Any, Annotated
 from urllib.parse import parse_qs, urlparse
 
+from fastmcp import FastMCP
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from pydantic import Field
-from fastmcp import FastMCP
 
-from ..utils.api_keys import api_vault
+from modules.utils.api_keys import api_vault
 
-T = TypeVar("T", bound=FastMCP)
 logger = logging.getLogger(__name__)
 
 
-# -----------------------------
-# Enums / schema helpers
-# -----------------------------
+# ---------------------------------------------------------------------------
+# Logging helpers (same style as the old commented-out log_youtube_search_result)
+# ---------------------------------------------------------------------------
+
+def _indent_block(text: str, *, spaces: int = 2) -> str:
+    pad = " " * spaces
+    return "\n".join(pad + line if line else line for line in text.splitlines())
+
+
+def log_tool_result(
+    tool_name: str,
+    result: Mapping[str, Any],
+    *,
+    level: int = logging.INFO,
+    indent: int = 2,
+    items_key: str = "items",
+) -> None:
+    """Pretty-log a tool result with per-item indentation.
+
+    Logging behavior:
+      - If result[items_key] is a list: logs each element as JSON
+      - If result[items_key] is a dict: logs each (key,value) as {key: value} JSON
+    """
+    if not logger.isEnabledFor(level):
+        return
+
+    header_bits: list[str] = [tool_name]
+    for k in (
+        "query",
+        "order",
+        "maxResults",
+        "kinds",
+        "inputs_count",
+        "video_ids_count",
+        "playlist_ids_count",
+        "max_videos",
+    ):
+        if k in result:
+            header_bits.append(f"{k}={result.get(k)!r}")
+    logger.log(level, "OK %s", " ".join(header_bits))
+
+    items = result.get(items_key)
+    if not items:
+        logger.log(level, "  (no %s returned)", items_key)
+        return
+
+    if isinstance(items, Mapping):
+        for idx, (key, item) in enumerate(items.items(), start=1):
+            pretty = json.dumps({key: item}, indent=indent, ensure_ascii=False, default=str)
+            logger.log(level, "  [%d]\n%s", idx, _indent_block(pretty, spaces=4))
+        return
+
+    if isinstance(items, list):
+        for idx, item in enumerate(items, start=1):
+            pretty = json.dumps(item, indent=indent, ensure_ascii=False, default=str)
+            logger.log(level, "  [%d]\n%s", idx, _indent_block(pretty, spaces=4))
+        return
+
+    pretty = json.dumps(items, indent=indent, ensure_ascii=False, default=str)
+    logger.log(level, "  %s", _indent_block(pretty, spaces=2))
+
+
+def yt_execute(req, *, label: str = "") -> dict[str, Any]:
+    """Execute a googleapiclient request with debug logging."""
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("[YT %s] %s %s", label, getattr(req, "method", ""), getattr(req, "uri", ""))
+    resp = req.execute()
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "[YT %s] response: items=%d keys=%s",
+            label,
+            len(resp.get("items", []) or []),
+            list(resp.keys()),
+        )
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 class YtOrder(str, Enum):
     date = "date"
     rating = "rating"
     relevance = "relevance"
     title = "title"
-    videocount = "videocount"
+    videocount = "videoCount"
+    viewcount = "viewCount"
 
+    @property
+    def help(self) -> str:
+        return {
+            YtOrder.date: "Reverse chronological by publish date.",
+            YtOrder.rating: "Highest to lowest rating.",
+            YtOrder.relevance: "Most relevant to the query (default).",
+            YtOrder.title: "Alphabetical by title.",
+            YtOrder.videocount: "Channels by uploaded video count; live by concurrent viewers.",
+            YtOrder.viewcount: "Highest to lowest view count.",
+        }[self]
 
-ORDER_HELP = {
-    YtOrder.date: "Reverse chronological by publish date.",
-    YtOrder.rating: "Highest to lowest rating.",
-    YtOrder.relevance: "Most relevant to the query (default).",
-    YtOrder.title: "Alphabetical by title.",
-    YtOrder.videocount: "Channels by uploaded video count; live by concurrent viewers.",
-}
+    @classmethod
+    def coerce(cls, value: "YtOrder | str") -> "YtOrder":
+        if isinstance(value, cls):
+            return value
+        v = str(value).strip()
+        try:
+            return cls(v)
+        except Exception as exc:
+            raise ValueError(f"Invalid YtOrder {value!r}. Valid: {[e.value for e in cls]}") from exc
+
+    @classmethod
+    def help_text(cls) -> str:
+        return " | ".join(f"{e.value}: {e.help}" for e in cls)
 
 
 class SearchKind(str, Enum):
@@ -56,16 +161,35 @@ class SearchKind(str, Enum):
     playlist = "playlist"
     both = "video,playlist"
 
+    @classmethod
+    def coerce(cls, value: "SearchKind | str") -> "SearchKind":
+        if isinstance(value, cls):
+            return value
+        raw = str(value).strip().lower()
+        aliases = {
+            "both": cls.both,
+            "all": cls.both,
+            "any": cls.both,
+            "video,playlist": cls.both,
+            "videos": cls.video,
+            "playlists": cls.playlist,
+        }
+        if raw in aliases:
+            return aliases[raw]
+        try:
+            return cls(raw)
+        except Exception as exc:
+            raise ValueError(f"Invalid SearchKind {value!r}. Valid: {[e.value for e in cls]}") from exc
 
-# -----------------------------
+
+# ---------------------------------------------------------------------------
 # ID extraction + duration parsing
-# -----------------------------
+# ---------------------------------------------------------------------------
 
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
-
-# Playlist IDs are not fixed length; common prefixes:
-#  PL... (most user playlists), UU... (uploads), LL... (likes), RD... (mix), OL... etc.
-_PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
+_PLAYLIST_ID_RE = re.compile(
+    r"^(PL|UU|LL|FL|OL|RD|WL)[A-Za-z0-9_-]{10,200}$"
+)
 
 _ISO8601_DUR_RE = re.compile(
     r"^P"
@@ -79,10 +203,6 @@ _ISO8601_DUR_RE = re.compile(
 
 
 def parse_iso8601_duration_to_seconds(dur: str) -> int:
-    """
-    YouTube returns ISO-8601 durations like:
-      PT15M33S, PT1H2M, PT49S, P1DT2H
-    """
     m = _ISO8601_DUR_RE.match(dur or "")
     if not m:
         return 0
@@ -93,8 +213,38 @@ def parse_iso8601_duration_to_seconds(dur: str) -> int:
     return (((days * 24 + hours) * 60 + minutes) * 60) + seconds
 
 
-def extract_video_id(url_or_id: str) -> Optional[str]:
-    """Extract a YouTube videoId from a URL or raw ID; returns None if not found."""
+def _as_int(v: Any) -> int:
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+
+def _chunked(seq: list[str], size: int) -> Iterable[list[str]]:
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+def dedupe_preserve_order(items: Iterable[Any]) -> list[Any]:
+    seen: set[Any] = set()
+    out: list[Any] = []
+    for x in items:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def merge_outer(target: dict[str, dict[str, Any]], source: dict[str, dict[str, Any]]) -> None:
+    """Merge nested dicts: target[outer].update(source[outer])."""
+    for outer_key, inner_updates in source.items():
+        if outer_key not in target:
+            target[outer_key] = dict(inner_updates)
+        else:
+            target[outer_key].update(inner_updates)
+
+
+def extract_video_id(url_or_id: str) -> str | None:
     s = (url_or_id or "").strip()
     if _VIDEO_ID_RE.match(s):
         return s
@@ -103,21 +253,18 @@ def extract_video_id(url_or_id: str) -> Optional[str]:
     host = (p.netloc or "").lower()
     path = p.path.strip("/")
 
-    # youtube.com/watch?v=VIDEO
     if "youtube.com" in host:
         qs = parse_qs(p.query)
         v = (qs.get("v") or [None])[0]
         if v and _VIDEO_ID_RE.match(v):
             return v
 
-        # /shorts/<id>, /embed/<id>, /v/<id>
         parts = path.split("/")
         if len(parts) >= 2 and parts[0] in {"shorts", "embed", "v"}:
             cand = parts[1]
             if _VIDEO_ID_RE.match(cand):
                 return cand
 
-    # youtu.be/<id>
     if "youtu.be" in host:
         cand = path.split("/")[0]
         if _VIDEO_ID_RE.match(cand):
@@ -126,13 +273,10 @@ def extract_video_id(url_or_id: str) -> Optional[str]:
     return None
 
 
-def extract_playlist_id(url_or_id: str) -> Optional[str]:
-    """Extract a YouTube playlistId from a URL or raw playlist ID; returns None if not found."""
+def extract_playlist_id(url_or_id: str) -> str | None:
     s = (url_or_id or "").strip()
 
-    # If they pass a raw playlist ID
     if _PLAYLIST_ID_RE.match(s) and not _VIDEO_ID_RE.match(s):
-        # Heuristic: accept raw IDs; caller can validate by API response.
         return s
 
     p = urlparse(s)
@@ -141,19 +285,12 @@ def extract_playlist_id(url_or_id: str) -> Optional[str]:
     if pl and _PLAYLIST_ID_RE.match(pl):
         return pl
 
-    # playlist URL may be /playlist?list=...
-    # For completeness: /watch?v=...&list=...
     return None
 
 
-def normalize_video_inputs(inputs: Iterable[str]) -> Tuple[List[str], List[Dict[str, Any]]]:
-    """
-    Returns:
-      (video_ids, errors)
-    errors is a list of {input, error}
-    """
-    video_ids: List[str] = []
-    errors: List[Dict[str, Any]] = []
+def normalize_video_inputs(inputs: Iterable[str]) -> tuple[list[str], list[dict[str, Any]]]:
+    video_ids: list[str] = []
+    errors: list[dict[str, Any]] = []
 
     for raw in inputs:
         vid = extract_video_id(raw)
@@ -162,20 +299,30 @@ def normalize_video_inputs(inputs: Iterable[str]) -> Tuple[List[str], List[Dict[
         else:
             video_ids.append(vid)
 
-    # De-dupe while preserving order
-    seen = set()
-    deduped: List[str] = []
-    for vid in video_ids:
-        if vid not in seen:
-            seen.add(vid)
-            deduped.append(vid)
-
-    return deduped, errors
+    return list(dedupe_preserve_order(video_ids)), errors
 
 
-# -----------------------------
+def normalize_playlist_inputs(inputs: Iterable[str]) -> tuple[list[str], list[dict[str, Any]]]:
+    playlist_ids: list[str] = []
+    errors: list[dict[str, Any]] = []
+
+    for raw in inputs:
+        pl = extract_playlist_id(raw)
+        if not pl:
+            errors.append({"input": raw, "error": "Could not extract playlist_id"})
+        else:
+            playlist_ids.append(pl)
+
+    return list(dedupe_preserve_order(playlist_ids)), errors
+
+
+def _coerce_to_list_str(x: str | list[str]) -> list[str]:
+    return x if isinstance(x, list) else [x]
+
+
+# ---------------------------------------------------------------------------
 # YouTube API client helpers
-# -----------------------------
+# ---------------------------------------------------------------------------
 
 def _get_youtube_client():
     vault = api_vault()
@@ -185,45 +332,105 @@ def _get_youtube_client():
     return build("youtube", "v3", developerKey=google_key)
 
 
-def _as_int(v: Any) -> int:
-    try:
-        return int(v)
-    except Exception:
-        return 0
-
-
-def _chunked(seq: List[str], size: int) -> Iterable[List[str]]:
-    for i in range(0, len(seq), size):
-        yield seq[i:i + size]
-
-
-def _videos_list(youtube, video_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-    """
-    Fetch snippet + contentDetails + statistics for many video IDs.
-    Returns dict keyed by video_id -> full API item
-    """
-    out: Dict[str, Dict[str, Any]] = {}
+def _get_video_details(youtube, video_ids: str | list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    out: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
     if not video_ids:
-        return out
+        return out, errors
 
-    # videos.list supports up to 50 IDs per request
-    for chunk in _chunked(video_ids, 50):
-        req = youtube.videos().list(  # pylint: disable=no-member
-            part="snippet,contentDetails,statistics",
-            id=",".join(chunk),
-            maxResults=len(chunk),
-        )
-        resp = req.execute()
-        for item in resp.get("items", []) or []:
-            out[item.get("id", "")] = item
-    return out
+    try:
+        if isinstance(video_ids, str):
+            vid = extract_video_id(video_ids) or video_ids
+            req = youtube.videos().list(part="snippet,contentDetails,statistics", id=vid, maxResults=1)
+            resp = yt_execute(req, label="videos.list single")
+            out.extend(resp.get("items", []) or [])
+            return out, errors
+
+        for chunk in _chunked(video_ids, 50):
+            req = youtube.videos().list(
+                part="snippet,contentDetails,statistics",
+                id=",".join(chunk),
+                maxResults=len(chunk),
+            )
+            resp = yt_execute(req, label="videos.list batch")
+            out.extend(resp.get("items", []) or [])
+
+    except HttpError as e:
+        errors.append({"error": "YouTube API error", "details": str(e)})
+
+    return out, errors
 
 
-def _shape_video_item(video_id: str, video_item: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _get_playlist_details(youtube, playlist_ids: str | list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    out: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    if not playlist_ids:
+        return out, errors
+
+    try:
+        if isinstance(playlist_ids, str):
+            pid = extract_playlist_id(playlist_ids) or playlist_ids
+            req = youtube.playlists().list(part="snippet,contentDetails,status", id=pid, maxResults=1)
+            resp = yt_execute(req, label="playlists.list single")
+            out.extend(resp.get("items", []) or [])
+            return out, errors
+
+        for chunk in _chunked(playlist_ids, 50):
+            req = youtube.playlists().list(part="snippet,contentDetails,status", id=",".join(chunk), maxResults=len(chunk))
+            resp = yt_execute(req, label="playlists.list batch")
+            out.extend(resp.get("items", []) or [])
+
+    except HttpError as e:
+        errors.append({"error": "YouTube API error", "details": str(e)})
+
+    return out, errors
+
+
+# CHANGE #1 (cleaned helper you restored):
+def youtube_get_playlist_videos(
+    youtube,
+    playlist_id: str,
+    *,
+    max_videos: int = 50,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Fetch playlistItems for a single playlistId (paged).
+
+    Returns (items, errors).
     """
-    Produce MCP-friendly JSON for a video result.
-    If video_item is None (private/deleted/unavailable), still return a stub.
-    """
+    # Assume playlist_id is already validated/extracted.
+    errors: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
+    page_token: str | None = None
+
+    if not playlist_id:
+        return items, [{"error": "missing_playlist_id"}]
+
+    try:
+        while len(items) < max_videos:
+            req = youtube.playlistItems().list(
+                part="id,snippet,contentDetails,status",
+                playlistId=playlist_id,
+                maxResults=min(50, max_videos - len(items)),
+                pageToken=page_token,
+            )
+            resp = yt_execute(req, label="playlistItems.list")
+            items.extend(resp.get("items", []) or [])
+
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+
+    except HttpError as e:
+        errors.append({"error": "YouTube API error", "details": str(e)})
+
+    return items, errors
+
+
+# ---------------------------------------------------------------------------
+# Shapers
+# ---------------------------------------------------------------------------
+
+def _shape_video_info(video_id: str, video_item: dict[str, Any] | None) -> dict[str, Any]:
     if not video_item:
         return {
             "kind": "video",
@@ -261,222 +468,419 @@ def _shape_video_item(video_id: str, video_item: Optional[Dict[str, Any]]) -> Di
     }
 
 
-def _shape_playlist_search_item(search_item: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Playlists don't have duration/views/likes/comments in a meaningful single value.
-    For search results, we return what search.list gives us + a playlist URL + playlist_id.
-    (If you want playlist itemCount/title/etc beyond snippet, add playlists.list later.)
-    """
-    snippet = search_item.get("snippet") or {}
-    pid = (search_item.get("id") or {}).get("playlistId", "")
+def _shape_playlist_info(playlist_id: str, playlist_item: dict[str, Any] | None) -> dict[str, Any]:
+    if not playlist_item:
+        return {
+            "kind": "playlist",
+            "playlist_id": playlist_id,
+            "url": f"https://www.youtube.com/playlist?list={playlist_id}",
+            "title": "",
+            "description": "",
+            "publishedAt": "",
+            "channelTitle": "",
+            "privacyStatus": "",
+            "itemCount": 0,
+            "available": False,
+        }
+
+    snippet = playlist_item.get("snippet") or {}
+    content = playlist_item.get("contentDetails") or {}
+    status = playlist_item.get("status") or {}
+
+    pid = playlist_item.get("id") or playlist_id
 
     return {
         "kind": "playlist",
         "playlist_id": pid,
-        "url": f"https://www.youtube.com/playlist?list={pid}" if pid else "",
+        "url": f"https://www.youtube.com/playlist?list={pid}",
         "title": snippet.get("title", ""),
         "description": snippet.get("description", ""),
         "publishedAt": snippet.get("publishedAt", ""),
         "channelTitle": snippet.get("channelTitle", ""),
-        "thumbnails": snippet.get("thumbnails", {}),
+        "privacyStatus": status.get("privacyStatus", ""),
+        "itemCount": _as_int(content.get("itemCount")),
+        "available": True,
     }
 
 
-# -----------------------------
+def _shape_playlist_video_entry(playlist_id: str, playlist_item: dict[str, Any]) -> dict[str, Any]:
+    snippet = playlist_item.get("snippet") or {}
+    content = playlist_item.get("contentDetails") or {}
+    status = playlist_item.get("status") or {}
+
+    return {
+        "kind": "playlist#video",
+        "playlistId": playlist_id,
+        "videoId": content.get("videoId", ""),
+        "title": snippet.get("title", ""),
+        "description": snippet.get("description", ""),
+        "publishedAt": snippet.get("publishedAt", ""),
+        "startAt": content.get("startAt", ""),
+        "endAt": content.get("endAt", ""),
+        "note": content.get("note", ""),
+        "privacyStatus": status.get("privacyStatus", ""),
+        "position": _as_int(snippet.get("position")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Search enrichment
+# ---------------------------------------------------------------------------
+
+def enrich_search_items(youtube, search_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Preserve original order and enrich search items.
+
+    - Videos -> videos.list -> _shape_video_info
+    - Playlists -> playlists.list -> _shape_playlist_info
+    Does NOT expand playlists via playlistItems.list.
+    """
+    spine: list[dict[str, Any]] = []
+    video_ids: list[str] = []
+    playlist_ids: list[str] = []
+
+    for it in search_items:
+        id_obj = it.get("id") or {}
+        kind = (id_obj.get("kind") or "").lower()
+
+        if kind.endswith("#video"):
+            vid = id_obj.get("videoId") or ""
+            spine.append({"kind": "video", "id": vid})
+            if vid:
+                video_ids.append(vid)
+        elif kind.endswith("#playlist"):
+            pid = id_obj.get("playlistId") or ""
+            spine.append({"kind": "playlist", "id": pid})
+            if pid:
+                playlist_ids.append(pid)
+        else:
+            spine.append({"kind": "unknown", "raw": it})
+
+    video_ids = list(dedupe_preserve_order(video_ids))
+    playlist_ids = list(dedupe_preserve_order(playlist_ids))
+
+    video_items, _video_errors = _get_video_details(youtube, video_ids)
+    playlist_items, _playlist_errors = _get_playlist_details(youtube, playlist_ids)
+
+    video_by_id = {it.get("id"): it for it in (video_items or []) if it.get("id")}
+    playlist_by_id = {it.get("id"): it for it in (playlist_items or []) if it.get("id")}
+
+    out: list[dict[str, Any]] = []
+    for node in spine:
+        if node["kind"] == "video":
+            vid = node["id"]
+            out.append(_shape_video_info(vid, video_by_id.get(vid)))
+        elif node["kind"] == "playlist":
+            pid = node["id"]
+            out.append(_shape_playlist_info(pid, playlist_by_id.get(pid)))
+        else:
+            out.append({"kind": "unknown", "raw": node.get("raw")})
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # MCP Tools
-# -----------------------------
+# ---------------------------------------------------------------------------
 
 def youtube_search(
-    query: Annotated[str, Field(description="Search terms.")],
-    order: Annotated[
-        YtOrder,
+    query: Annotated[
+        str,
         Field(
-            default=YtOrder.relevance,
-            description="Sort order. " + " ".join(f"{k.value}: {v}" for k, v in ORDER_HELP.items()),
+            description=(
+                "Search query using standard web-search syntax when possible. "
+                "Supports quoted phrases and exclusion with '-'."
+            )
         ),
+    ],
+    order: Annotated[
+        YtOrder | str,
+        Field(default=YtOrder.relevance, description="Sort order. " + YtOrder.help_text()),
     ] = YtOrder.relevance,
     max_results: Annotated[int, Field(description="Max search items (1-50).", ge=1, le=50)] = 10,
     kinds: Annotated[
-        SearchKind,
-        Field(
-            default=SearchKind.both,
-            description="Return videos only, playlists only, or both.",
-        ),
+        SearchKind | str,
+        Field(default=SearchKind.both, description="Return videos only, playlists only, or both."),
     ] = SearchKind.both,
-) -> Dict[str, Any]:
-    """
-    Search YouTube and return MCP-friendly JSON.
-
-    Important behavior:
-      - Preserves the ordering of search results.
-      - For video results, enriches with duration + statistics (via videos.list).
-      - For playlist results, returns playlist snippet fields + playlist_id + playlist URL,
-        but does NOT expand (user can call youtube_playlist_videos to expand).
-    """
+) -> dict[str, Any]:
+    """Search YouTube and return enriched MCP-friendly JSON (no playlist expansion)."""
+    sk_kinds = SearchKind.coerce(kinds)
+    yt_order = YtOrder.coerce(order)
     youtube = _get_youtube_client()
 
-    # search.list returns "items" ordered per the request's sort criteria
-    req = youtube.search().list(  # pylint: disable=no-member
-        part="snippet,id",
+    req = youtube.search().list(
+        part="id,snippet",
         q=query,
-        type=kinds.value,  # "video", "playlist", or "video,playlist"
+        type=sk_kinds.value,
         maxResults=max_results,
-        order=order.value,
+        order=yt_order.value,
     )
 
     try:
-        resp = req.execute()
+        resp = yt_execute(req, label="search.list")
     except HttpError as e:
-        return {
+        result = {
             "query": query,
-            "order": order.value,
+            "order": yt_order.value,
             "maxResults": max_results,
-            "kinds": kinds.value,
+            "kinds": sk_kinds.value,
             "items": [],
             "errors": [{"error": "YouTube API error", "details": str(e)}],
         }
+        log_tool_result("youtube_search", result, level=logging.DEBUG)
+        return result
 
-    search_items: List[Dict[str, Any]] = resp.get("items") or []
+    search_items: list[dict[str, Any]] = resp.get("items") or []
+    out_items = enrich_search_items(youtube, search_items)
 
-    # Gather all video IDs in search order for a single batch metadata call
-    # Playlist results are handled separately.
-    video_ids_in_order: List[str] = []
-    for it in search_items:
-        kind = (it.get("id") or {}).get("kind", "")
-        if kind.endswith("#video"):
-            vid = (it.get("id") or {}).get("videoId")
-            if vid:
-                video_ids_in_order.append(vid)
-
-    video_map = _videos_list(youtube, video_ids_in_order)
-
-    # Build ordered output items (same order as search.list)
-    out_items: List[Dict[str, Any]] = []
-    for it in search_items:
-        id_obj = it.get("id") or {}
-        kind = id_obj.get("kind", "")
-
-        if kind.endswith("#video"):
-            vid = id_obj.get("videoId", "")
-            out_items.append(_shape_video_item(vid, video_map.get(vid)))
-        elif kind.endswith("#playlist"):
-            out_items.append(_shape_playlist_search_item(it))
-        else:
-            # Unexpected kind; keep a minimally useful record
-            out_items.append({"kind": "unknown", "raw": it})
-
-    return {
+    result = {
         "query": query,
-        "order": order.value,
+        "order": yt_order.value,
         "maxResults": max_results,
-        "kinds": kinds.value,
+        "kinds": sk_kinds.value,
         "items": out_items,
         "errors": [],
     }
 
+    log_tool_result("youtube_search", result, level=logging.DEBUG)
+    return result
+
 
 def youtube_video_info(
-    inputs: Annotated[
-        List[str],
-        Field(description="List of YouTube video URLs or video IDs."),
-    ],
-) -> Dict[str, Any]:
-    """
-    Return full metadata (snippet + duration + stats) for one or many videos.
-    Preserves the order of the provided inputs (after removing invalid inputs).
-    """
+    inputs: Annotated[list[str], Field(description="List of YouTube video URLs or video IDs.")],
+) -> dict[str, Any]:
+    """Return full metadata for one or many videos."""
     youtube = _get_youtube_client()
 
     video_ids, errors = normalize_video_inputs(inputs)
-    video_map = _videos_list(youtube, video_ids)
+    video_items, api_errors = _get_video_details(youtube, video_ids)
+    errors.extend(api_errors)
 
-    # Preserve input order (deduped order)
-    items = [_shape_video_item(vid, video_map.get(vid)) for vid in video_ids]
+    video_by_id = {it.get("id"): it for it in (video_items or []) if it.get("id")}
 
-    return {
+    items: list[dict[str, Any]] = []
+    for vid in video_ids:
+        items.append(_shape_video_info(vid, video_by_id.get(vid)))
+
+    result = {
         "inputs_count": len(inputs),
         "video_ids_count": len(video_ids),
         "items": items,
         "errors": errors,
     }
 
+    log_tool_result("youtube_video_info", result, level=logging.DEBUG)
+    return result
 
-def youtube_playlist_videos(
+
+# CHANGE (request #3): playlist arg is ONLY str | list[str]
+def youtube_playlist_info(
     playlist: Annotated[
-        str,
-        Field(description="YouTube playlist URL or playlist ID (list=...)."),
+        str | list[str],
+        Field(description="Playlist URL/ID or list of playlist URLs/IDs."),
     ],
-    max_videos: Annotated[
-        int,
-        Field(description="Max videos to return from the playlist.", ge=1, le=500),
-    ] = 50,
-) -> Dict[str, Any]:
-    """
-    Expand a playlist to per-video metadata objects (same schema as youtube_search video items).
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """Return general playlist metadata only.
 
-    This is the *user-controlled* expansion tool, so callers can decide whether to use playlists.
+    This does NOT fetch playlistItems or video metadata.
     """
     youtube = _get_youtube_client()
+    inputs = _coerce_to_list_str(playlist)
 
-    playlist_id = extract_playlist_id(playlist)
-    if not playlist_id:
-        return {
-            "playlist": playlist,
-            "playlist_id": "",
-            "items": [],
-            "errors": [{"input": playlist, "error": "Could not extract playlist_id"}],
-        }
+    # Preserve input order.
+    playlist_ids: list[str] = []
+    parse_errors: list[dict[str, Any]] = []
+    for raw in inputs:
+        pid = extract_playlist_id(raw) or raw.strip()
+        if not pid or not _PLAYLIST_ID_RE.match(pid):
+            parse_errors.append({"input": raw, "error": "Could not extract playlist_id"})
+        playlist_ids.append(pid)
 
-    # 1) Get video IDs from playlistItems.list (paged)
-    video_ids: List[str] = []
-    page_token: Optional[str] = None
-    errors: List[Dict[str, Any]] = []
+    unique_ids = [pid for pid in dedupe_preserve_order(playlist_ids) if pid]
+    meta_items, meta_errors = _get_playlist_details(youtube, unique_ids)
+    meta_by_id = {it.get("id"): it for it in (meta_items or []) if it.get("id")}
 
-    try:
-        while True:
-            req = youtube.playlistItems().list(  # pylint: disable=no-member
-                part="contentDetails",
-                playlistId=playlist_id,
-                maxResults=min(50, max_videos - len(video_ids)),
-                pageToken=page_token,
-            )
-            resp = req.execute()
-            for it in resp.get("items", []) or []:
-                cd = it.get("contentDetails") or {}
-                vid = cd.get("videoId")
-                if vid:
-                    video_ids.append(vid)
-                    if len(video_ids) >= max_videos:
-                        break
+    out: list[dict[str, Any]] = []
+    for pid, raw in zip(playlist_ids, inputs, strict=False):
+        if not pid or pid not in meta_by_id:
+            shaped = _shape_playlist_info(pid or "", None)
+            shaped["errors"] = [{"input": raw, "error": "Playlist not found or invalid"}]
+        else:
+            shaped = _shape_playlist_info(pid, meta_by_id.get(pid))
+            shaped["errors"] = []
+        out.append(shaped)
 
-            if len(video_ids) >= max_videos:
-                break
+    # Batch-level problems apply to all results:
+    if parse_errors or meta_errors:
+        for item in out:
+            item.setdefault("errors", []).extend(parse_errors)
+            item.setdefault("errors", []).extend(meta_errors)
 
-            page_token = resp.get("nextPageToken")
-            if not page_token:
-                break
-    except HttpError as e:
-        errors.append({"error": "YouTube API error", "details": str(e)})
+    if isinstance(playlist, list):
+        result: dict[str, Any] | list[dict[str, Any]] = out
+        log_tool_result("youtube_playlist_info", {"playlist_ids_count": len(out), "items": out}, level=logging.DEBUG)
+    else:
+        result = out[0] if out else {}
+        log_tool_result("youtube_playlist_info", {"playlist_ids_count": 1, "items": [result]}, level=logging.DEBUG)
 
-    # 2) Batch fetch video metadata
-    video_map = _videos_list(youtube, video_ids)
-
-    # 3) Preserve playlist order
-    items = [_shape_video_item(vid, video_map.get(vid)) for vid in video_ids]
-
-    return {
-        "playlist": playlist,
-        "playlist_id": playlist_id,
-        "requested_max_videos": max_videos,
-        "returned_videos": len(items),
-        "items": items,
-        "errors": errors,
-    }
+    return result
 
 
-def register(mcp: T):
-    """Register youtube_search tools with MCPServer."""
-    logger.info("Registering youtube_search tools")
+# CHANGE (request #1): separate opt-in expansion tool
+def youtube_playlist_video_list(
+    playlist: Annotated[
+        str | list[str],
+        Field(description="Playlist URL/ID or list of playlist URLs/IDs."),
+    ],
+    max_videos: Annotated[int, Field(description="Max videos per playlist.", ge=1, le=500)] = 50,
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """Return playlist videos enriched with video_info-style metadata.
+
+    Output shape per playlist:
+      {
+        "kind": "playlist_videos",
+        "playlist_id": "...",
+        "url": "https://www.youtube.com/playlist?list=...",
+        "max_videos": 50,
+        "items": { "<videoId>": { ...playlist_fields..., ...video_fields... } },
+        "errors": [...]
+      }
+    """
+    youtube = _get_youtube_client()
+    inputs = _coerce_to_list_str(playlist)
+
+    playlist_ids: list[str] = []
+    parse_errors: list[dict[str, Any]] = []
+    for raw in inputs:
+        pid = extract_playlist_id(raw) or raw.strip()
+        if not pid or not _PLAYLIST_ID_RE.match(pid):
+            parse_errors.append({"input": raw, "error": "Could not extract playlist_id"})
+        playlist_ids.append(pid)
+
+    # Optional: fetch playlist metadata for title/channel/itemCount (batched)
+    unique_ids = [pid for pid in dedupe_preserve_order(playlist_ids) if pid]
+    meta_items, meta_errors = _get_playlist_details(youtube, unique_ids)
+    meta_by_id = {it.get("id"): it for it in (meta_items or []) if it.get("id")}
+
+    out: list[dict[str, Any]] = []
+    for pid, raw in zip(playlist_ids, inputs, strict=False):
+        errors: list[dict[str, Any]] = []
+        errors.extend(meta_errors)
+
+        if not pid or not _PLAYLIST_ID_RE.match(pid):
+            out.append({
+                "kind": "playlist_videos",
+                "playlist_id": "",
+                "url": "",
+                "max_videos": max_videos,
+                "items": {},
+                "errors": errors + [{"input": raw, "error": "invalid playlist"}],
+            })
+            continue
+
+        pl_items, pl_errs = youtube_get_playlist_videos(youtube, pid, max_videos=max_videos)
+        errors.extend(pl_errs)
+
+        # Shape playlistItems rows
+        pl_video: dict[str, dict[str, Any]] = {}
+        for itm in pl_items:
+            vid = (itm.get("contentDetails") or {}).get("videoId")
+            if not vid:
+                continue
+            pl_video[vid] = _shape_playlist_video_entry(pid, itm)
+
+        # Enrich using videos.list (same fields as youtube_video_info)
+        video_ids = list(pl_video.keys())
+        if video_ids:
+            v_items, v_errs = _get_video_details(youtube, video_ids)
+            errors.extend(v_errs)
+            v_by_id = {it.get("id"): it for it in (v_items or []) if it.get("id")}
+            v_shaped = {vid: _shape_video_info(vid, v_by_id.get(vid)) for vid in video_ids}
+            merge_outer(pl_video, v_shaped)
+
+        pl_meta = _shape_playlist_info(pid, meta_by_id.get(pid))
+        out.append({
+            "kind": "playlist_videos",
+            "playlist_id": pid,
+            "url": pl_meta.get("url", f"https://www.youtube.com/playlist?list={pid}"),
+            "title": pl_meta.get("title", ""),
+            "channelTitle": pl_meta.get("channelTitle", ""),
+            "itemCount": pl_meta.get("itemCount", 0),
+            "max_videos": max_videos,
+            "items": pl_video,
+            "errors": errors,
+        })
+
+    # Parsing errors apply globally to the call:
+    if parse_errors:
+        for item in out:
+            item.setdefault("errors", []).extend(parse_errors)
+
+    if isinstance(playlist, list):
+        result: dict[str, Any] | list[dict[str, Any]] = out
+        log_tool_result(
+            "youtube_playlist_video_list",
+            {"playlist_ids_count": len(out), "max_videos": max_videos, "items": out},
+            level=logging.DEBUG,
+        )
+    else:
+        result = out[0] if out else {}
+        log_tool_result(
+            "youtube_playlist_video_list",
+            {"playlist_ids_count": 1, "max_videos": max_videos, "items": [result]},
+            level=logging.DEBUG,
+        )
+
+    return result
+
+
+def register(mcp: FastMCP) -> None:
+    """Register tools with FastMCP."""
+    logger.info("Registering YouTube tools")
     mcp.tool(tags=["public", "api"])(youtube_search)
     mcp.tool(tags=["public", "api"])(youtube_video_info)
-    mcp.tool(tags=["public", "api"])(youtube_playlist_videos)
+    mcp.tool(tags=["public", "api"])(youtube_playlist_info)
+    mcp.tool(tags=["public", "api"])(youtube_playlist_video_list)
+
+
+def test() -> None:
+    """Simple CLI entry point."""
+    yt_search = "Python tutorials about list comprehension"
+
+    logger.info("Executing youtube_search(query=%s)", yt_search)
+    sr = youtube_search(query=yt_search, order="date", max_results=5, kinds="video,playlist")
+    log_tool_result("youtube_search", sr, level=logging.INFO)
+
+    playlist_ids = [it.get("playlist_id") for it in sr.get("items", []) if it.get("kind") == "playlist"]
+    playlist_ids = [pid for pid in playlist_ids if pid]
+
+    if playlist_ids:
+        logger.info("Fetching playlist info only (no expansion)")
+        pi = youtube_playlist_info(playlist=playlist_ids[:2])
+        log_tool_result("youtube_playlist_info", {"items": pi if isinstance(pi, list) else [pi]}, level=logging.INFO)
+
+        logger.info("Expanding playlist videos (opt-in)")
+        pv = youtube_playlist_video_list(playlist=playlist_ids[0], max_videos=10)
+        if isinstance(pv, dict):
+            log_tool_result("youtube_playlist_video_list", {"items": pv.get("items", {})}, level=logging.INFO, items_key="items")
+
+# -------------------------------------------------------------------------------
+# Search for Playlists only
+# -------------------------------------------------------------------------------
+
+
+    logger.info("Executing youtube_search(query=%s)", yt_search)
+    sr = youtube_search(query=yt_search, order="date", max_results=5, kinds="playlist")
+    log_tool_result("youtube_search", sr, level=logging.INFO)
+
+    playlist_ids = [it.get("playlist_id") for it in sr.get("items", []) if it.get("kind") == "playlist"]
+    playlist_ids = [pid for pid in playlist_ids if pid]
+
+    if playlist_ids:
+        logger.info("Expanding playlist videos (opt-in)")
+        pv = youtube_playlist_video_list(playlist=playlist_ids[0], max_videos=3)
+        if isinstance(pv, dict):
+            log_tool_result("youtube_playlist_video_list", {"items": pv.get("items", {})}, level=logging.INFO, items_key="items")
+
+
+if __name__ == "__main__":
+    test()
