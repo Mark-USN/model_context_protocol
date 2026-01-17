@@ -1,36 +1,62 @@
 #./src/debug_stub.py
 
+# import signal
 import asyncio
-import subprocess
-import signal
 import logging
-from pathlib import Path
+import argparse
+import sys
+from modules.utils.logging_config import setup_logging
 
-# import modules.tools.youtube_to_text as yt_to_text
-from modules.utils.api_keys import api_vault
+# -----------------------------
+# Logging setup
+# -----------------------------
+logger = logging.getLogger(__name__)
 
 
 def debug_stub():
-    """ A simple debug stub to test importing the youtube_to_text tool.
-    """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    """ Main entry point: parse arguments and start/stop server or run client. """    
+    parser = argparse.ArgumentParser(
+        description="Create and run an MCP server or client."
     )
-    logger = logging.getLogger(Path(__file__).stem)
-    try:
-        api_keys = api_vault()
-        google_key = api_keys.get_value("GOOGLE_KEY")
-        print(f"The value for Google_Key is: {google_key}")
 
-        # yt_to_text.main()
-        # logger.info(f"Successfully imported tool: youtube_to_text")
+    parser.add_argument("--test",
+        choices=["demo-server", "long-job-server", "universal-client", "yt-search", "yt-audio"],
+        type=str.lower,
+        required=True,
+        help="Run as server, long_job_server, client, or stop-server."
+    )
 
-    except Exception as e:
-        # logger.error(f"Failed to import YouTubeToTextTool: {e}")
-        logger.error(f"api_key threw an exception: {e}")
+    args = parser.parse_args()
 
+    # 20251215 MMH Show help if no arguments are given
+    if len(sys.argv) == 1:  
+        parser.print_help()
+        sys.exit(1)  # Exit with an error code
+
+    match args.test:
+        case "demo-server":
+            import modules.mcp_servers.demo_server as demo
+            demo.main()
+        case "long-job-server":
+            import modules.mcp_servers.long_job_server as ljs
+            ljs.launch_server()
+        case "universal-client":
+            from modules.mcp_clients.universal_client import UniversalClient
+            # import modules.mcp_clients.universal_client as uc
+            asyncio.run(UniversalClient("127.0.0.1", 8085).run())
+        case "yt_search":
+            import modules.tools.youtube_search as yt_search
+            # from modules.utils.api_keys import api_vault
+            # api_keys = api_vault()
+            # google_key = api_keys.get_value("GOOGLE_KEY")
+            yt_search.main()
+        case "yt-audio":
+            import modules.tools.youtube_audio_transcript as yt_audio
+            yt_audio.main()
 
 if __name__ == "__main__":
+    # -----------------------------
+    # Logging setup
+    # -----------------------------
+    setup_logging()
     debug_stub()

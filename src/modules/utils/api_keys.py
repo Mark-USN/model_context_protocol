@@ -1,19 +1,13 @@
 """ A simple API keys management class using python-dotenv."""
-import os
+# import os
 import dotenv
 import logging
-from pathlib import Path
+# from pathlib import Path
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logging.basicConfig(
-    # level=logging.DEBUG if settings.debug else logging.INFO,
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(Path(__file__).stem)
+logger = logging.getLogger(__name__)
 
 
 class api_vault(object):
@@ -27,7 +21,7 @@ class api_vault(object):
                 self.keys = dotenv.dotenv_values()
 
         except Exception as e:
-            logger.error(f"Error loading keys from {keys_file}: {e}")
+            logger.error("Error loading keys from %s: %s", keys_file, e)
             raise e
 
     def get_value(self, key:str):
@@ -37,6 +31,6 @@ class api_vault(object):
 
 
 if __name__ == "__main__":
-    api = api.api_keys()
-    value = api.get_value("GOOGLE_KEY")
-    print(f"The value for Google_Key is: {value}")
+    api = api_vault()
+    key_value = api.get_value("GOOGLE_KEY")
+    print(f"The value for Google_Key is: {key_value}")
