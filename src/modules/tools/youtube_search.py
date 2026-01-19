@@ -26,20 +26,25 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import os
 from collections.abc import Iterable, Mapping
 from enum import Enum
 from typing import Any, Annotated
 from urllib.parse import parse_qs, urlparse
-
-from fastmcp import FastMCP
+from pydantic import Field
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from pydantic import Field
+from fastmcp import FastMCP
 
 from modules.utils.api_keys import api_vault
 
 logger = logging.getLogger(__name__)
 
+# A small, process-wide throttle to avoid overwhelming upstream services when a
+# workflow engine fans out work in parallel.
+_MAX_CONCURRENT_FETCHES = int(os.environ.get("MCP_SEARCH_MAX_CONCURRENCY", "6"))
+_SEARCH_SEM = threading.BoundedSemaphore(value=max(1, _MAX_CONCURRENT_FETCHES))
 
 # ---------------------------------------------------------------------------
 # Logging helpers (same style as the old commented-out log_youtube_search_result)
@@ -107,15 +112,22 @@ def yt_execute(req, *, label: str = "") -> dict[str, Any]:
     """Execute a googleapiclient request with debug logging."""
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("[YT %s] %s %s", label, getattr(req, "method", ""), getattr(req, "uri", ""))
-    resp = req.execute()
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "[YT %s] response: items=%d keys=%s",
-            label,
-            len(resp.get("items", []) or []),
-            list(resp.keys()),
-        )
-    return resp
+    try:
+        with _SEARCH_SEM:
+            resp = req.execute()
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[YT %s] response: items=%d keys=%s",
+                    label,
+                    len(resp.get("items", []) or []),
+                    list(resp.keys()),
+                )
+            return resp
+    except Exception as exc:  # pragma: no cover
+        logger.warning("⚠️ %s failed with %s", getattr(req, "method", ""), exc)
+        return {}
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -844,7 +856,7 @@ def register(mcp: FastMCP) -> None:
 
 def test() -> None:
     """Simple CLI entry point."""
-    yt_search = "Python tutorials about list comprehension"
+    yt_search = "Python tutorials about list comprehension -shorts"
 
     logger.info("Executing youtube_search(query=%s)", yt_search)
     sr = youtube_search(query=yt_search, order="date", max_results=5, kinds="video,playlist")
