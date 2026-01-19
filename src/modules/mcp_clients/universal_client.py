@@ -7,15 +7,9 @@
 # from ..utils.logging_config import setup_logging
 import asyncio
 from pathlib import Path
-import re
-import time
-import random
 import logging
-from typing import Any, List, Dict, Optional, TypeVar
-from datetime import timedelta
+from typing import Any, List, Dict, Optional # , TypeVar
 from .youtube_demo import run_youtube_demo
-from ..utils.job_client_mixin import JobClientMixin
-from ..utils.tokens import retrieve_sid
 
 from fastmcp import Client
 
@@ -28,10 +22,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 # Control which examples to run
 # ---------------------------------------------------------------------
+RUN_PROMPT_EXAMPLES = True
 RUN_TOOL_EXAMPLES = True
-RUN_PROMPT_EXAMPLES = False
 
-class UniversalClient(JobClientMixin, Client):
+
+class UniversalClient(Client):
     """ 20251003 MMH universal_client class
         A universal MCP client that connects to a FastMCP server,
         lists available tools, resources, templates, and prompts,
@@ -60,77 +55,12 @@ class UniversalClient(JobClientMixin, Client):
         """ Return a set of available tool names on the server. """
         return self.tool_names
 
-    def get_video_id(self, url: str) -> str:
-        """Extract the YouTube video ID from a URL.
-            Args: url: The YouTube video URL.
-        """
-        url = url.strip()
-        if not url:
-            raise ValueError("Empty URL")
-
-        # YouTube uses a short-link service for videos that looks like:
-        # https://youtu.be/VIDEO_ID or https://youtu.be/dQw4w9WgXcQ
-        m = re.search(r"youtu\.be/([A-Za-z0-9_\-]{6,})", url)
-        if m:
-            return m.group(1)
-
-        m = re.search(r"[?&]v=([A-Za-z0-9_\-]{6,})", url)
-        if m:
-            return m.group(1)
-        raise ValueError("Invalid YouTube URL")
 
     def base_output_dir(self) -> Path:
         """Base folder for project cache (inside mymcpserver/cache)."""
         out_dir = Path(__file__).resolve().parents[3] / "cache" / "universal_client"
         out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir
-
-    # ---------------------------------------------------------------------
-    # Helper Methods for Long-Running Tools
-    # ---------------------------------------------------------------------
-
-    def token(self) -> Optional[str]:
-        """Return the current session token."""
-        return self.session_info.get("token") if self.session_info else None
-
-    def session_id(self) -> Optional[str]:
-        """ Return the current session ID.
-            This is always derived from the token to avoid mix-ups or attempts to
-            use falsified session_ids.
-        """
-        # return self.session_info.get("session_id") if self.session_info else None
-        return retrieve_sid(self.token()) if self.session_info else None
-
-
-    def expires(self) -> Optional[int]:
-        return self.session_info.get("exp") if self.session_info else None
-
-    async def get_token(self, ttl: Optional[int]=None) -> None:
-        """ Get a session information which include the token session id, and 
-            experation time. Needed for calling certain tools like those related to
-            long-running jobs.
-        """
-        if ttl is not None:
-            logger.info(f"\nRequesting session token with TTL={ttl} seconds.")   
-            args ={"ttl_s": ttl}
-        else:
-            logger.info("\nRequesting session token with default TTL.")   
-            args ={}
-        logger.info("\n\nExecuting 'get_session_token' tool ")
-        try:
-            token_result = await self.call_tool("get_session_token", args)
-            self.session_info = token_result.data
-            # If the tool returns a dict, pull the real token string out of it.
-            if self.session_info is not None:
-                logger.info(f"\nResult of get_session_token tool: {self.session_info}\n"
-                      f"session_info[token] = {self.session_info.get('token')}\n")
-            else:
-                logger.info("Error: get_session_token returned no data.")
-        except Exception as e:
-            logger.info(f"Error obtaining session token: {e}")
-            self.session_info = None
-
-    # Long-running tool helpers are provided by JobClientMixin.
 
 # ---------------------------------------------------------------------
 # Start Client/Server Interaction
@@ -151,23 +81,22 @@ class UniversalClient(JobClientMixin, Client):
             self.tool_names = {tool.name for tool in self.tools_list}
             self._show_tools(self.tools_list)
 
-            # resources = await self.list_resources()
-            # self._show_resources(resources)
+            resources = await self.list_resources()
+            self._show_resources(resources)
 
-            # templates = await self.list_resource_templates()
-            # self._show_templates(templates)
+            templates = await self.list_resource_templates()
+            self._show_templates(templates)
 
-            prompts = None
-            # prompts = await self.list_prompts()
-            # self._show_prompts(prompts)
-
-            if RUN_TOOL_EXAMPLES:
-                # Execute example tools
-                await self._run_example_tools(self.tools_list)
+            prompts = await self.list_prompts()
+            self._show_prompts(prompts)
 
             if RUN_PROMPT_EXAMPLES:
                 # Execute example prompts
                 await self._run_example_prompts(prompts)
+
+            if RUN_TOOL_EXAMPLES:
+                # Execute example tools
+                await self._run_example_tools(self.tools_list)
 
 # ---------------------------------------------------------------------
 #
@@ -259,12 +188,6 @@ class UniversalClient(JobClientMixin, Client):
         if "youtube_text" in self.tool_names:
             await run_youtube_demo(self)
 
-    async def _run_add_demo(self) -> None:
-        """Demonstrate calling the 'add' tool."""
-        logger.info("\n\nExecuting 'add' tool with parameters a=5, b=3")
-        result = await self.call_tool("add", {"a": 5, "b": 3})
-        logger.info(f"Result of add tool: {result}")
-
 # ---------------------------------------------------------------------
 #
 #           Run Example Prompts
@@ -275,78 +198,23 @@ class UniversalClient(JobClientMixin, Client):
         """Run example tool invocations where available."""
         prompt_names = {prompt.name for prompt in prompts}
 
-        if "summarize_text" in prompt_names:
-            await self._run_summarize_text_demo()
+        if "youtube_query_normalizer" in prompt_names:
+            await self._run_youtube_query_normalizer_prompt()
         else:
             logger.info("\n'summarize_text' prompt not available on this server.")
 
-        if "ask_about_topic" in prompt_names:
-            await self._run_ask_about_topic_demo()
-        else:
-            logger.info("\n'ask_about_topic' prompt not available on this server.")
 
-        if "generate_code_request" in prompt_names:
-            await self._run_generate_code_request_demo()
-        else:
-            logger.info("\n'generate_code_request' prompt not available on this server.")
-
-        if "roleplay_scenario" in prompt_names:
-            await self._run_roleplay_scenario_demo()
-        else:
-            logger.info("\n'roleplay_scenario' prompt not available on this server.")
-
-    async def _run_summarize_text_demo(self) -> None:
-        """Demonstrate calling the 'summarize_text' prompt."""
-        logger.info("\n\nExecuting 'summarize_text' prompt with parameters "
-              "topic=Dogbert Characteristics, lang=en")
-        result = await self.get_prompt("summarize_text",
-                            {"text": "Dogbert Characteristics", "lang":"en"})
-        logger.info(f"Result of summarize_text Prompt: {result}")
+    async def _run_youtube_query_normalizer_prompt(self) -> None:
+        """Demonstrate calling the 'youtube_query_normalizer' prompt."""
+        logger.info("\n\nExecuting 'youtube_query_normalizer' prompt with parameters "
+              "search_string=Find English language videos on the topic of python list comprehensions")
+        result = await self.get_prompt("youtube_query_normalizer",
+                            {"search_string": "Find English language videos on the topic of python list comprehensions"})
+        logger.info(f"Result of youtube_query_normalizer Prompt: {result}")
         # Access the personalized messages
         logger.info("\nPersonalized Messages:")
         for message in result.messages:
             logger.info(f"Generated message: {message.content}")
-
-
-    async def _run_ask_about_topic_demo(self) -> None:
-        """Demonstrate calling the 'ask_about_topic' prompt."""
-        logger.info("\n\nExecuting 'ask_about_topic' prompt with parameters "
-              "topic=Dogbert Characteristics")
-        result = await self.get_prompt("ask_about_topic",
-                            {"topic": "Dogbert Characteristics"})
-        logger.info(f"Result of ask_about_topic Prompt: {result}")
-        # Access the personalized messages
-        logger.info("\nPersonalized Messages:")
-        for message in result.messages:
-            logger.info(f"Generated message: {message.content}")
-
-    async def _run_generate_code_request_demo(self) -> None:
-        """Demonstrate calling the 'generate_code_request' prompt."""
-        logger.info("\n\nExecuting 'generate_code_request' prompt with parameters "
-              "language=assembly, task_description= build windows operating system")
-        result = await self.get_prompt("generate_code_request",
-                            {"language": "assembly",
-                             "task_description":"build windows operating system"})
-        logger.info(f"Result of generate_code_request Prompt: {result}")
-        # Access the personalized messages
-        logger.info("\nPersonalized Messages:")
-        for message in result.messages:
-            logger.info(f"Generated message: {message.content}")
-
-
-    async def _run_roleplay_scenario_demo(self) -> None:
-        """Demonstrate calling the 'roleplay_scenario' prompt."""
-        logger.info("\n\nExecuting 'roleplay_scenario' prompt with parameters "
-              "character=Roger Rabbit, situation= The real world")
-        result = await self.get_prompt("roleplay_scenario",
-                            {"character": "Roger Rabbit",
-                             "situation":"The real world"})
-        logger.info(f"Result of roleplay_scenario Prompt: {result}")
-        # Access the personalized messages
-        logger.info("\nPersonalized Messages:")
-        for message in result.messages:
-            logger.info(f"Generated message: {message.content}")
-
 
 if __name__ == "__main__":
     # -----------------------------
