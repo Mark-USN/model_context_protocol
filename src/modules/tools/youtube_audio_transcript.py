@@ -16,7 +16,9 @@ from youtube_transcript_api import FetchedTranscript
 from dataclasses import dataclass
 from collections.abc import Callable
 from fastmcp import FastMCP  # pylint: disable=unused-import
-from ..utils.ffmpeg_bootstrap import ensure_ffmpeg_on_path, get_ffmpeg_binary_path
+from modules.utils.ffmpeg_bootstrap import ensure_ffmpeg_on_path, get_ffmpeg_binary_path
+from modules.utils.paths import resolve_cache_paths
+from modules.utils.youtube_ids import extract_video_id, is_video_id
 # from youtube_transcript_api import YouTubeTranscriptApi, FetchedTranscript
 
 T = TypeVar("T", bound="FastMCP")
@@ -25,6 +27,16 @@ T = TypeVar("T", bound="FastMCP")
 # Logging setup
 # -----------------------------
 logger = logging.getLogger(__name__)
+
+
+def _get_transcript_cache_path(video_id: str) -> Path:
+    """Return the path to the cached transcript JSON for this video."""
+
+    return resolve_cache_paths(
+        app_name = "transcripts",
+        start = Path(__file__)).app_cache_dir / f"{video_id}.json"
+
+
 
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
 
@@ -37,26 +49,26 @@ CHUNK_DURATION_SECONDS = 30.0
 CHUNK_OVERLAP_SECONDS = 5.0
 
 
-# ----------------- Helpers -----------------
-def get_video_id(url: str) -> str:
-    """Extract the YouTube video ID from a URL.
-        Args: url: The YouTube video URL.
-    """
-    url = url.strip()
-    if not url:
-        raise ValueError("Empty URL")
+# # ----------------- Helpers -----------------
+# def get_video_id(url: str) -> str:
+#     """Extract the YouTube video ID from a URL.
+#         Args: url: The YouTube video URL.
+#     """
+#     url = url.strip()
+#     if not url:
+#         raise ValueError("Empty URL")
 
-    # Short-link service: https://youtu.be/VIDEO_ID
-    m = re.search(r"youtu\.be/([A-Za-z0-9_\-]{6,})", url)
-    if m:
-        return m.group(1)
+#     # Short-link service: https://youtu.be/VIDEO_ID
+#     m = re.search(r"youtu\.be/([A-Za-z0-9_\-]{6,})", url)
+#     if m:
+#         return m.group(1)
 
-    # Standard watch URLs: https://www.youtube.com/watch?v=VIDEO_ID
-    m = re.search(r"[?&]v=([A-Za-z0-9_\-]{6,})", url)
-    if m:
-        return m.group(1)
+#     # Standard watch URLs: https://www.youtube.com/watch?v=VIDEO_ID
+#     m = re.search(r"[?&]v=([A-Za-z0-9_\-]{6,})", url)
+#     if m:
+#         return m.group(1)
 
-    raise ValueError("Invalid YouTube URL")
+#     raise ValueError("Invalid YouTube URL")
 
 # ----------------- Output management -----------------
 
@@ -270,7 +282,7 @@ def fetch_audio_transcript(
     """
     if prefer_langs is None:
         prefer_langs = ["en", "es"]
-    video_id = get_video_id(url)
+    video_id = extract_video_id(url)
     cache_path = _get_transcript_cache_path(video_id)
 
     # 1) If we already have a cached transcript, reuse it.
@@ -603,7 +615,7 @@ async def fetch_audio_transcript_async(
     if progress_cb:
         progress_cb(0.0, "starting")
 
-    video_id = get_video_id(url)
+    video_id = extract_video_id(url)
     cache_path = _get_transcript_cache_path(video_id)
 
     if cache_path.exists():

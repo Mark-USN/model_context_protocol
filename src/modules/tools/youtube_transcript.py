@@ -43,6 +43,8 @@ from youtube_transcript_api import (
     YouTubeTranscriptApi,
 )
 from fastmcp import FastMCP  # pylint: disable=unused-import
+from modules.utils.paths import resolve_cache_paths
+from modules.utils.youtube_ids import extract_video_id, is_video_id
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ PREFERRED_LANGS: tuple[str, ...] = (
     "es-ES",
 )
 
-_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+# _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
 @contextmanager
@@ -144,82 +146,84 @@ def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> Non
             pass
 
 
-def get_video_id(url_or_id: str) -> str:
-    """Extract a YouTube video id from a URL *or* accept a bare id.
+# def get_video_id(url_or_id: str) -> str:
+#     """Extract a YouTube video id from a URL *or* accept a bare id.
 
-    Args:
-        url_or_id: Full YouTube URL (watch/shorts/youtu.be) or the bare video id.
+#     Args:
+#         url_or_id: Full YouTube URL (watch/shorts/youtu.be) or the bare video id.
 
-    Returns:
-        The YouTube video id.
+#     Returns:
+#         The YouTube video id.
 
-    Raises:
-        ValueError: If the input is empty or does not contain a valid video id.
-    """
+#     Raises:
+#         ValueError: If the input is empty or does not contain a valid video id.
+#     """
 
-    candidate = (url_or_id or "").strip()
-    if not candidate:
-        raise ValueError("Empty URL/video id")
+#     candidate = (url_or_id or "").strip()
+#     if not candidate:
+#         raise ValueError("Empty URL/video id")
 
-    # Allow callers/agents to pass just a video id.
-    if "://" not in candidate and _VIDEO_ID_RE.fullmatch(candidate):
-        return candidate
+#     # Allow callers/agents to pass just a video id.
+#     if "://" not in candidate and _VIDEO_ID_RE.fullmatch(candidate):
+#         return candidate
 
-    parsed = urlparse(candidate)
+#     parsed = urlparse(candidate)
 
-    # https://youtu.be/<id>
-    if parsed.netloc.endswith("youtu.be"):
-        vid = parsed.path.lstrip("/").split("/", 1)[0]
-        if _VIDEO_ID_RE.fullmatch(vid or ""):
-            return vid
+#     # https://youtu.be/<id>
+#     if parsed.netloc.endswith("youtu.be"):
+#         vid = parsed.path.lstrip("/").split("/", 1)[0]
+#         if _VIDEO_ID_RE.fullmatch(vid or ""):
+#             return vid
 
-    # https://www.youtube.com/watch?v=<id>
-    qs = parse_qs(parsed.query)
-    if "v" in qs and qs["v"]:
-        vid = qs["v"][0]
-        if _VIDEO_ID_RE.fullmatch(vid or ""):
-            return vid
+#     # https://www.youtube.com/watch?v=<id>
+#     qs = parse_qs(parsed.query)
+#     if "v" in qs and qs["v"]:
+#         vid = qs["v"][0]
+#         if _VIDEO_ID_RE.fullmatch(vid or ""):
+#             return vid
 
-    # https://www.youtube.com/shorts/<id>
-    if parsed.path.startswith("/shorts/"):
-        vid = parsed.path.removeprefix("/shorts/")
-        if "/" not in vid and _VIDEO_ID_RE.fullmatch(vid):
-            return vid
+#     # https://www.youtube.com/shorts/<id>
+#     if parsed.path.startswith("/shorts/"):
+#         vid = parsed.path.removeprefix("/shorts/")
+#         if "/" not in vid and _VIDEO_ID_RE.fullmatch(vid):
+#             return vid
     
-    raise ValueError(f"Invalid YouTube URL/video id: {url_or_id!r}")
+#     raise ValueError(f"Invalid YouTube URL/video id: {url_or_id!r}")
 
 
-def _get_cache_dir() -> Path:
-    """Base folder for project cache.
+# def _get_cache_dir() -> Path:
+#     """Base folder for project cache.
 
-    Resolution order:
-    1) MCP_CACHE_DIR environment variable
-    2) <repo_root>/cache (best-effort heuristic: 3 parents up from this file)
-    3) ./cache (fallback)
-    """
+#     Resolution order:
+#     1) MCP_CACHE_DIR environment variable
+#     2) <repo_root>/cache (best-effort heuristic: 3 parents up from this file)
+#     3) ./cache (fallback)
+#     """
 
-    if override := os.environ.get("MCP_CACHE_DIR"):
-        return Path(override).expanduser().resolve()
+#     if override := os.environ.get("MCP_CACHE_DIR"):
+#         return Path(override).expanduser().resolve()
 
-    here = Path(__file__).resolve()
-    try:
-        return here.parents[3] / "cache"
-    except IndexError:
-        return Path.cwd() / "cache"
+#     here = Path(__file__).resolve()
+#     try:
+#         return here.parents[3] / "cache"
+#     except IndexError:
+#         return Path.cwd() / "cache"
 
 
-def _get_transcripts_dir() -> Path:
-    """Folder for transcript cache."""
+# def _get_transcripts_dir() -> Path:
+#     """Folder for transcript cache."""
 
-    out_dir = _get_cache_dir() / "transcripts"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
+#     out_dir = resolve_cache_paths() / "transcripts"
+#     out_dir.mkdir(parents=True, exist_ok=True)
+#     return out_dir
 
 
 def _get_transcript_cache_path(video_id: str) -> Path:
     """Return the path to the cached transcript JSON for this video."""
 
-    return _get_transcripts_dir() / f"{video_id}.json"
+    return resolve_cache_paths(
+        app_name = "transcripts",
+        start = Path(__file__)).app_cache_dir / f"{video_id}.json"
 
 
 def _as_raw_snippets(transcript: FetchedTranscript | list[TranscriptSnippet]) -> list[TranscriptSnippet]:
@@ -281,7 +285,7 @@ def fetch_transcript(
     """
 
     langs = list(prefer_langs) if prefer_langs is not None else list(PREFERRED_LANGS)
-    video_id = get_video_id(url_or_id)
+    video_id = extract_video_id(url_or_id)
     cache_path = _get_transcript_cache_path(video_id)
     lock_path = cache_path.with_suffix(cache_path.suffix + ".lock")
 

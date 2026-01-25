@@ -13,19 +13,20 @@
 # import pkgutil
 # from dataclasses import dataclass, field
 # from enum import Enum
-# from ..utils.tokens import requires_token
+# from modules.utils.tokens import requires_token
 import time
 import argparse
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
 from fastmcp import FastMCP
-from ..utils.logging_config import setup_logging
-from ..utils.jobs import long_tools_require_token
-from ..utils.prompt_md_loader import register_prompts_from_markdown
-from ..utils.prompt_loader import register_prompts
-from ..utils.tool_loader import register_tools
-from ..utils.long_tool_loader import register_long_tools
+from modules.utils.logging_config import setup_logging
+from modules.utils.jobs import long_tools_require_token
+from modules.utils.prompt_md_loader import register_prompts_from_markdown
+from modules.utils.prompt_loader import register_prompts
+from modules.utils.tool_loader import register_tools
+from modules.utils.long_tool_loader import register_long_tools
+from modules.utils.paths import get_module_path, resolve_cache_paths
 
 
 # mcp = FastMCP(name="MCP-HMAC-LongJobs")
@@ -38,12 +39,19 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 # Paths to tool, prompt, resource packages
 # -----------------------------
-_MODULES_DIR = Path(__file__).parents[1].resolve()
-_TOOLS_DIR = _MODULES_DIR / "tools"
-_PROMPTS_DIR = _MODULES_DIR / "prompts"
-_RESOURCES_DIR = _MODULES_DIR / "resources"
-_PROJECT_DIR = _MODULES_DIR.parents[1].resolve()
-_CACHE_DIR = _PROJECT_DIR / "Cache" 
+def _get_tools_dir()->Path:
+    return get_module_path(start = Path(__file__)) / "Tools"
+
+def _get_prompts_dir()->Path:
+    return get_module_path(start = Path(__file__)) / "Prompts"
+
+def _get_resources_dir()->Path:
+    return get_module_path(start = Path(__file__)) / "Resources"
+
+def _get_cache_dir()->Path:
+    cache_path = get_module_path(start = Path(__file__)) / "Cache"
+    cache_path.mkdir(parents=True, exist_ok=True)
+    return cache_path
 
 # -----------------------------
 # From demo_server.py: Paths to tool, prompt, resource packages
@@ -72,13 +80,19 @@ def purge_server_cache(days: int = 7) -> None:
 
     cutoff = time.time() - (days * 86400)
 
-    audio_dir = _CACHE_DIR / "audio"
+    audio_dir = resolve_cache_paths(
+                app_name = "audio",
+                start = Path(__file__)
+            )
     if audio_dir.exists():
         for f in audio_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
                 f.unlink(missing_ok=True)
 
-    transcript_dir = _CACHE_DIR / "transcripts"
+    transcript_dir = resolve_cache_paths(
+                app_name = "transcripts",
+                start = Path(__file__)
+            )
     if transcript_dir.exists():
         for f in transcript_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
@@ -98,18 +112,18 @@ def attach_everything():
         Make sure you trust the code in those packages!
     """
     # Regular tools behave exactly like demo_server
-    register_tools(mcp, package=_TOOLS_DIR)
+    register_tools(mcp, package=_get_tools_dir())
     logger.info("✅\t Tools registered.")
 
     # Long tools: only those registered via register_long_tools are wrapped as background jobs
     with long_tools_require_token(mcp):
-        register_long_tools(mcp, package=_TOOLS_DIR)
+        register_long_tools(mcp, package=_get_tools_dir())
     logger.info("✅\t Long tools registered (launch as jobs; token required).")
 
-    register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
+    register_prompts_from_markdown(mcp, prompts_dir=_get_prompts_dir())
     logger.info("✅\t Prompts from markdown registered.")
 
-    register_prompts(mcp, prompts_dir=_PROMPTS_DIR)
+    register_prompts(mcp, prompts_dir=_get_prompts_dir())
     logger.info("✅\t Prompts registered.")
 
 

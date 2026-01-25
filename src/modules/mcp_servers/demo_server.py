@@ -11,11 +11,12 @@ import logging
 import time
 from pathlib import Path
 from fastmcp import FastMCP
-from ..utils.logging_config import setup_logging
-from ..utils.prompt_md_loader import register_prompts_from_markdown
-from ..utils.prompt_loader import register_prompts
-from ..utils.tool_loader import register_tools
-# from ..utils.long_tool_loader import register_long_tools
+from modules.utils.logging_config import setup_logging
+from modules.utils.prompt_md_loader import register_prompts_from_markdown
+from modules.utils.prompt_loader import register_prompts
+from modules.utils.tool_loader import register_tools
+from modules.utils.paths import resolve_cache_paths, get_module_path
+# from modules.utils.long_tool_loader import register_long_tools
 
 
 # -----------------------------
@@ -26,12 +27,20 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 # Paths to tool, prompt, resource packages
 # -----------------------------
-_MODULES_DIR = Path(__file__).parents[1].resolve()
-_TOOLS_DIR = _MODULES_DIR / "tools"
-_PROMPTS_DIR = _MODULES_DIR / "prompts"
-_RESOURCES_DIR = _MODULES_DIR / "resources"
-_PROJECT_DIR = _MODULES_DIR.parents[1].resolve()
-_CACHE_DIR = _PROJECT_DIR / "Cache" 
+def _get_tools_dir()->Path:
+    return get_module_path(start = Path(__file__)) / "Tools"
+
+def _get_prompts_dir()->Path:
+    return get_module_path(start = Path(__file__)) / "Prompts"
+
+def _get_resources_dir()->Path:
+    return get_module_path(start = Path(__file__)) / "Resources"
+
+def _get_cache_dir()->Path:
+    cache_path = get_module_path(start = Path(__file__)) / "Cache"
+    cache_path.mkdir(parents=True, exist_ok=True)
+    return cache_path
+
 
 
 # -----------------------------
@@ -58,13 +67,19 @@ def purge_cache(days: int = 7) -> None:
 
     cutoff = time.time() - (days * 86400)
 
-    audio_dir = _CACHE_DIR / "audio"
+    audio_dir = resolve_cache_paths(
+                app_name = "audio",
+                start = Path(__file__)
+            )
     if audio_dir.exists():
         for f in audio_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
                 f.unlink(missing_ok=True)
 
-    transcript_dir = _CACHE_DIR / "transcripts"
+    transcript_dir = resolve_cache_paths(
+                app_name = "transcripts",
+                start = Path(__file__)
+            )
     if transcript_dir.exists():
         for f in transcript_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
@@ -80,16 +95,16 @@ def attach_everything():
         Any error in a file will cause the tools or prompts in that package to be ignored.
         Make sure you trust the code in those packages!
     """
-    register_tools(mcp, package=_TOOLS_DIR)
+    register_tools(mcp, package=_get_tools_dir())
     logger.info("✅	 Tools registered.")
 
     # register_long_tools(mcp, package=_TOOLS_DIR)
     # logger.info("✅	 Long tools registered.")
 
-    register_prompts_from_markdown(mcp, prompts_dir=_PROMPTS_DIR)
+    register_prompts_from_markdown(mcp, prompts_dir=_get_prompts_dir())
     logger.info("✅	 Markdown files parsed and prompts registered.")
 
-    register_prompts(mcp, prompts_dir=_PROMPTS_DIR)
+    register_prompts(mcp, prompts_dir=_get_prompts_dir())
     logger.info("✅	 Prompt functions registered.")
 
 def launch_server(host:str="127.0.0.1", port:int=8085):

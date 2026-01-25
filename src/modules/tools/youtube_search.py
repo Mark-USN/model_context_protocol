@@ -36,7 +36,12 @@ from pydantic import Field
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
-
+from modules.utils.youtube_ids import (
+        extract_video_id,
+        is_video_id,
+        is_playlist_id,
+        extract_playlist_id
+    )
 from modules.utils.api_keys import api_vault
 
 logger = logging.getLogger(__name__)
@@ -198,10 +203,10 @@ class SearchKind(str, Enum):
 # ID extraction + duration parsing
 # ---------------------------------------------------------------------------
 
-_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
-_PLAYLIST_ID_RE = re.compile(
-    r"^(PL|UU|LL|FL|OL|RD|WL)[A-Za-z0-9_-]{10,200}$"
-)
+# _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+# _PLAYLIST_ID_RE = re.compile(
+#     r"^(PL|UU|LL|FL|OL|RD|WL)[A-Za-z0-9_-]{10,200}$"
+# )
 
 _ISO8601_DUR_RE = re.compile(
     r"^P"
@@ -256,48 +261,48 @@ def merge_outer(target: dict[str, dict[str, Any]], source: dict[str, dict[str, A
             target[outer_key].update(inner_updates)
 
 
-def extract_video_id(url_or_id: str) -> str | None:
-    s = (url_or_id or "").strip()
-    if _VIDEO_ID_RE.match(s):
-        return s
+# def extract_video_id(url_or_id: str) -> str | None:
+#     s = (url_or_id or "").strip()
+#     if _VIDEO_ID_RE.match(s):
+#         return s
 
-    p = urlparse(s)
-    host = (p.netloc or "").lower()
-    path = p.path.strip("/")
+#     p = urlparse(s)
+#     host = (p.netloc or "").lower()
+#     path = p.path.strip("/")
 
-    if "youtube.com" in host:
-        qs = parse_qs(p.query)
-        v = (qs.get("v") or [None])[0]
-        if v and _VIDEO_ID_RE.match(v):
-            return v
+#     if "youtube.com" in host:
+#         qs = parse_qs(p.query)
+#         v = (qs.get("v") or [None])[0]
+#         if v and _VIDEO_ID_RE.match(v):
+#             return v
 
-        parts = path.split("/")
-        if len(parts) >= 2 and parts[0] in {"shorts", "embed", "v"}:
-            cand = parts[1]
-            if _VIDEO_ID_RE.match(cand):
-                return cand
+#         parts = path.split("/")
+#         if len(parts) >= 2 and parts[0] in {"shorts", "embed", "v"}:
+#             cand = parts[1]
+#             if _VIDEO_ID_RE.match(cand):
+#                 return cand
 
-    if "youtu.be" in host:
-        cand = path.split("/")[0]
-        if _VIDEO_ID_RE.match(cand):
-            return cand
+#     if "youtu.be" in host:
+#         cand = path.split("/")[0]
+#         if _VIDEO_ID_RE.match(cand):
+#             return cand
 
-    return None
+#     return None
 
 
-def extract_playlist_id(url_or_id: str) -> str | None:
-    s = (url_or_id or "").strip()
+# def extract_playlist_id(url_or_id: str) -> str | None:
+#     s = (url_or_id or "").strip()
 
-    if _PLAYLIST_ID_RE.match(s) and not _VIDEO_ID_RE.match(s):
-        return s
+#     if _PLAYLIST_ID_RE.match(s) and not _VIDEO_ID_RE.match(s):
+#         return s
 
-    p = urlparse(s)
-    qs = parse_qs(p.query)
-    pl = (qs.get("list") or [None])[0]
-    if pl and _PLAYLIST_ID_RE.match(pl):
-        return pl
+#     p = urlparse(s)
+#     qs = parse_qs(p.query)
+#     pl = (qs.get("list") or [None])[0]
+#     if pl and _PLAYLIST_ID_RE.match(pl):
+#         return pl
 
-    return None
+#     return None
 
 
 def normalize_video_inputs(inputs: Iterable[str]) -> tuple[list[str], list[dict[str, Any]]]:
@@ -666,7 +671,7 @@ def youtube_video_info(
     video_ids, errors = normalize_video_inputs(inputs)
     video_items, api_errors = _get_video_details(youtube, video_ids)
     errors.extend(api_errors)
-
+    # Make a dict for easy lookup
     video_by_id = {it.get("id"): it for it in (video_items or []) if it.get("id")}
 
     items: list[dict[str, Any]] = []
@@ -703,7 +708,7 @@ def youtube_playlist_info(
     parse_errors: list[dict[str, Any]] = []
     for raw in inputs:
         pid = extract_playlist_id(raw) or raw.strip()
-        if not pid or not _PLAYLIST_ID_RE.match(pid):
+        if not pid or not is_playlist_id(pid):
             parse_errors.append({"input": raw, "error": "Could not extract playlist_id"})
         playlist_ids.append(pid)
 
@@ -764,7 +769,7 @@ def youtube_playlist_video_list(
     parse_errors: list[dict[str, Any]] = []
     for raw in inputs:
         pid = extract_playlist_id(raw) or raw.strip()
-        if not pid or not _PLAYLIST_ID_RE.match(pid):
+        if not pid or not is_playlist_id(pid):
             parse_errors.append({"input": raw, "error": "Could not extract playlist_id"})
         playlist_ids.append(pid)
 
@@ -778,7 +783,7 @@ def youtube_playlist_video_list(
         errors: list[dict[str, Any]] = []
         errors.extend(meta_errors)
 
-        if not pid or not _PLAYLIST_ID_RE.match(pid):
+        if not pid or not is_playlist_id(pid):
             out.append({
                 "kind": "playlist_videos",
                 "playlist_id": "",

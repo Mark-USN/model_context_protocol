@@ -22,6 +22,7 @@ import signal
 import logging
 from modules.utils.logging_config import setup_logging
 from pathlib import Path
+from modules.utils.paths import resolve_cache_paths
 from modules.mcp_servers import demo_server, long_job_server
 from modules.mcp_clients.universal_client import UniversalClient
 
@@ -35,10 +36,10 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 # Paths (PID & LOG live next to this file)
 # -----------------------------
-SRC_DIR = Path(__file__).resolve().parent
-ROOT_DIR = SRC_DIR.parent.resolve()
-PID_FILE = ROOT_DIR / "cache" / "mcp.pid"
-LOG_FILE = ROOT_DIR / "cache" / "mcp.log"
+
+
+PID_FILE = resolve_cache_paths(app_name = "", start = Path(__file__)).base_cache_dir / "mcp.pid"
+LOG_FILE = resolve_cache_paths(app_name = "", start = Path(__file__)).base_cache_dir / "mcp.log"
 
 
 # ---- Helper to find pythonw.exe on Windows ----
@@ -124,7 +125,7 @@ def start_server(host: str, port: int, debug: bool, mode:str):
             stdout=log_fh,
             stderr=log_fh,
             stdin=subprocess.DEVNULL,
-            cwd=str(SRC_DIR),
+            cwd=str(Path(__file__).resolve().parent),
             **kwargs,
         )
 
