@@ -11,7 +11,7 @@ import logging
 import time
 from pathlib import Path
 from fastmcp import FastMCP
-from modules.utils.logging_config import setup_logging
+from modules.utils.log_utils import configure_logging, get_logger
 from modules.utils.prompt_md_loader import register_prompts_from_markdown
 from modules.utils.prompt_loader import register_prompts
 from modules.utils.tool_loader import register_tools
@@ -22,7 +22,7 @@ from modules.utils.paths import resolve_cache_paths, get_module_path
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # -----------------------------
 # Paths to tool, prompt, resource packages
@@ -152,6 +152,8 @@ if __name__ == "__main__":
     # -----------------------------
     # Logging setup
     # -----------------------------
-    setup_logging()
+    configure_logging()
+    
+
 
     main()

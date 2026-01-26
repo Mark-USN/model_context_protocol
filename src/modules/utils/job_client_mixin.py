@@ -3,8 +3,10 @@ import logging
 import random
 import time
 from typing import Any, Dict, Optional
+from modules.utils.log_utils import get_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 class JobClientMixin:

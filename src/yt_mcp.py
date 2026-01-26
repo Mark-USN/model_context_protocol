@@ -20,7 +20,7 @@ import asyncio
 import subprocess
 import signal
 import logging
-from modules.utils.logging_config import setup_logging
+from modules.utils.log_utils import configure_logging, get_logger
 from pathlib import Path
 from modules.utils.paths import resolve_cache_paths
 from modules.mcp_servers import demo_server, long_job_server
@@ -29,9 +29,8 @@ from modules.mcp_clients.universal_client import UniversalClient
 # -----------------------------
 # Logging setup
 # -----------------------------
-setup_logging()
-logger = logging.getLogger(__name__)
-
+configure_logging()
+logger = get_logger(__name__)
 
 # -----------------------------
 # Paths (PID & LOG live next to this file)

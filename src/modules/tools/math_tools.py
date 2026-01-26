@@ -4,13 +4,14 @@ import logging
 from typing import TypeVar
 # from pathlib import Path
 from fastmcp import FastMCP
+from modules.utils.log_utils import get_logger
 
 T = TypeVar("T", bound=FastMCP)
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 

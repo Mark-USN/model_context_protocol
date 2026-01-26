@@ -35,7 +35,7 @@ from urllib.request import urlopen
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 

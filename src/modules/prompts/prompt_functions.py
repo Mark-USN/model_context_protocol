@@ -8,10 +8,12 @@ from typing import TypeVar
 from fastmcp import FastMCP
 from fastmcp.prompts.prompt import Message, PromptMessage, PromptResult, TextContent
 from pydantic import Field
+from modules.utils.log_utils import get_logger
+
 
 T = TypeVar("T", bound=FastMCP)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def youtube_query_normalizer_prompt(
     search_string: str = Field(

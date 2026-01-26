@@ -14,6 +14,8 @@ from mcp.types import CallToolResult, TextContent  # if you have the official mc
 # from ..utils.types import CallToolResult, TextContent
 
 from fastmcp import FastMCP
+from modules.utils.log_utils import get_logger
+
 # import base64
 # import argparse
 # from pathlib import Path
@@ -21,7 +23,7 @@ from fastmcp import FastMCP
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # =============================================================================

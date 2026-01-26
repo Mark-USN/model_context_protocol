@@ -2,12 +2,14 @@
 # import os
 import dotenv
 import logging
+from modules.utils.log_utils import get_logger
+
 # from pathlib import Path
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class api_vault(object):

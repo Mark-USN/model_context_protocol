@@ -9,6 +9,8 @@ import inspect
 import logging
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
+from modules.utils.log_utils import get_logger
+
 # from pathlib import Path
 # from contextlib import contextmanager
 # from fastmcp import FastMCP
@@ -19,7 +21,7 @@ from typing import Any, Callable, Dict, Optional, TypeVar, cast
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 

@@ -17,8 +17,10 @@ from typing import Any
 # from modules.utils.paths import resolve_cache_paths
 from modules.utils.youtube_ids import extract_video_id, extract_playlist_id
 from urllib.parse import parse_qs, urlparse
+from modules.utils.log_utils import get_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 # _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 # _PLAYLIST_ID_RE = re.compile(r"^(PL|UU|LL|FL|OL|RD|WL)[A-Za-z0-9_-]{10,200}$")
@@ -144,9 +146,10 @@ async def run_youtube_demo(client: Any) -> None:
 
     if playlist_urls:
         logger.info("Sampling playlist: %s", playlist_urls[0])
-        await client.call_tool(
+        pl_vid_result = await client.call_tool(
             "youtube_playlist_video_list",
             {"playlist": playlist_urls[0], "max_videos": 5},
         )
+        pl_vid_list = getattr(pl_vid_result, "data", {}) or {}
 
     await exercise_transcripts_round_robin(client, video_urls)

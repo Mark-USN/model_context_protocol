@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
-
+from modules.utils.log_utils import configure_logging, get_logger
 from modules.utils.paths import resolve_cache_paths
 from .youtube_demo import run_youtube_demo
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 RUN_PROMPT_EXAMPLES = True
 RUN_TOOL_EXAMPLES = True
@@ -135,6 +135,9 @@ class UniversalClient(Client):
             {"search_string": search_string},
         )
 
+        # 20260125 MMH dump the result from youtube_query_normalizer
+        logger.info("youtube_query_normalizer result = \n%s",json.dumps(result, indent=2, ensure_ascii=False))
+
         for msg in getattr(result, "messages", []) or []:
             logger.info("Prompt output: %s", getattr(msg, "content", msg))
 
@@ -163,9 +166,9 @@ class UniversalClient(Client):
 
 
 def main() -> None:
-    from modules.utils.logging_config import setup_logging
+    from modules.utils.log_utils import configure_logging, get_logger
 
-    setup_logging()
+    configure_logging(log_level=logging.INFO)
     asyncio.run(UniversalClient("127.0.0.1", 8085).run())
 
 

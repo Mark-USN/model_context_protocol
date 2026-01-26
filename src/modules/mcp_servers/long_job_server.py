@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
 from fastmcp import FastMCP
-from modules.utils.logging_config import setup_logging
+from modules.utils.log_utils import configure_logging, get_logger
 from modules.utils.jobs import long_tools_require_token
 from modules.utils.prompt_md_loader import register_prompts_from_markdown
 from modules.utils.prompt_loader import register_prompts
@@ -34,7 +34,7 @@ from modules.utils.paths import get_module_path, resolve_cache_paths
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # -----------------------------
 # Paths to tool, prompt, resource packages
@@ -158,6 +158,5 @@ if __name__ == "__main__":
     # -----------------------------
     # Logging setup
     # -----------------------------
-    setup_logging()
-
+    configure_logging()
     main()

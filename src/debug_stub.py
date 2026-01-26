@@ -5,12 +5,12 @@ import asyncio
 import logging
 import argparse
 import sys
-from modules.utils.logging_config import setup_logging
+from modules.utils.log_utils import configure_logging, get_logger
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def debug_stub():
@@ -58,5 +58,6 @@ if __name__ == "__main__":
     # -----------------------------
     # Logging setup
     # -----------------------------
-    setup_logging()
+    configure_logging()
+
     debug_stub()

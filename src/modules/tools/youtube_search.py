@@ -43,8 +43,8 @@ from modules.utils.youtube_ids import (
         extract_playlist_id
     )
 from modules.utils.api_keys import api_vault
-
-logger = logging.getLogger(__name__)
+from modules.utils.log_utils import get_logger
+logger = get_logger(__name__)
 
 # A small, process-wide throttle to avoid overwhelming upstream services when a
 # workflow engine fans out work in parallel.

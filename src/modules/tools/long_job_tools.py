@@ -8,13 +8,14 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from ..utils.jobs import JobState, _JOBS, jk, sweep_jobs 
 from ..utils.tokens import issue_token, requires_token, retrieve_sid, default_ttl
+from modules.utils.log_utils import get_logger
 
 T = TypeVar("T", bound=FastMCP)
 
 # -----------------------------
 # Logging setup
 # -----------------------------
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # async def _simulate_work(job: Job, payload: str):
 #     job.state = JobState.RUNNING

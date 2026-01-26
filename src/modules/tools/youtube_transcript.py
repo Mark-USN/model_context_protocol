@@ -46,7 +46,7 @@ from fastmcp import FastMCP  # pylint: disable=unused-import
 from modules.utils.paths import resolve_cache_paths
 from modules.utils.youtube_ids import extract_video_id, is_video_id
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 T = TypeVar("T", bound="FastMCP")
 
