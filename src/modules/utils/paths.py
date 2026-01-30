@@ -83,7 +83,7 @@ def resolve_cache_paths(*, app_name: str, start: Path, env_var: str = "MCP_CACHE
     app_cache.mkdir(parents=True, exist_ok=True)
     return CachePaths(base_cache_dir=base_cache, app_cache_dir=app_cache)
 
-def resolve_project_path(*, start: Path) -> CachePaths:
+def resolve_project_path(*, start: Path) -> Path:
     """Resolve Projects base directory.
 
     Resolution order:

@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
-import logging
+# import logging
 import textwrap
+import frontmatter  # pip/uv: python-frontmatter
 from pathlib import Path
 from typing import Any, TypeVar
-import frontmatter  # pip/uv: python-frontmatter
 from fastmcp import FastMCP
+from modules.utils.log_utils import get_logger # , log_tree
 
 T = TypeVar("T", bound=FastMCP)
 

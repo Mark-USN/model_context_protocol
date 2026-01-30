@@ -27,10 +27,11 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-import logging
+# import logging
 from pathlib import Path
 from typing import Optional
 from urllib.request import urlopen
+from modules.utils.log_utils import get_logger # , log_tree
 
 # -----------------------------
 # Logging setup

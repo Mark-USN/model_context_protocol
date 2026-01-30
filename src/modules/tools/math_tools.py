@@ -1,10 +1,10 @@
 ﻿# math_tools.py
 """ Math tools module for FastMCP server. """
-import logging
+# import logging
 from typing import TypeVar
 # from pathlib import Path
 from fastmcp import FastMCP
-from modules.utils.log_utils import get_logger
+from modules.utils.log_utils import get_logger # , log_tree
 
 T = TypeVar("T", bound=FastMCP)
 

@@ -1,4 +1,4 @@
-﻿import logging
+﻿# import logging
 import uuid
 import time
 # import asyncio
@@ -6,9 +6,9 @@ from typing import TypeVar, Optional, Dict
 # from pathlib import Path
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from ..utils.jobs import JobState, _JOBS, jk, sweep_jobs 
-from ..utils.tokens import issue_token, requires_token, retrieve_sid, default_ttl
-from modules.utils.log_utils import get_logger
+from modules.utils.jobs import JobState, _JOBS, jk, sweep_jobs 
+from modules.utils.tokens import issue_token, requires_token, retrieve_sid, default_ttl
+from modules.utils.log_utils import get_logger # , log_tree
 
 T = TypeVar("T", bound=FastMCP)
 
@@ -16,18 +16,6 @@ T = TypeVar("T", bound=FastMCP)
 # Logging setup
 # -----------------------------
 logger = get_logger(__name__)
-
-# async def _simulate_work(job: Job, payload: str):
-#     job.state = JobState.RUNNING
-#     job.started_at = time.time()
-#     steps = 20
-#     for i in range(steps):
-#         await asyncio.sleep(0.25)
-#         job.progress = (i + 1) / steps
-#     job.result = {"echo": payload, "ts": time.time()}
-#     job.state = JobState.DONE
-#     job.finished_at = time.time()
-
 
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
-from modules.utils.log_utils import configure_logging, get_logger
+from modules.utils.log_utils import LogConfig, configure_logging, get_logger, log_tree
 from modules.utils.paths import resolve_cache_paths
 from .youtube_demo import run_youtube_demo
 
@@ -82,8 +82,15 @@ class UniversalClient(Client):
     # -------------------------------------------------
     async def run(self) -> None:
         async with self:
-            await self.ping()
-
+            result = await self.ping()
+            log_tree(
+                logger,
+                logging.INFO,
+                f"ping",
+                result,
+                collapse_keys={"env"},  # env can be huge/noisy
+                redact_keys={"token", "api_key"},
+            )
             await self.refresh_tools()
             self._show_tools(self.tools_list)
 
@@ -112,7 +119,6 @@ class UniversalClient(Client):
             return
 
         transcript_tools = {
-            "youtube_snippets",
             "youtube_json",
             "youtube_text",
             "youtube_paragraph",
@@ -166,9 +172,9 @@ class UniversalClient(Client):
 
 
 def main() -> None:
-    from modules.utils.log_utils import configure_logging, get_logger
+    # from modules.utils.log_utils import LogConfig, configure_logging, get_logger, log_tree
 
-    configure_logging(log_level=logging.INFO)
+    configure_logging(LogConfig(level="INFO"))
     asyncio.run(UniversalClient("127.0.0.1", 8085).run())
 
 

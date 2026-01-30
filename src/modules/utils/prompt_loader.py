@@ -9,13 +9,13 @@ import sys
 import importlib
 import importlib.util
 import pkgutil
-import logging
+
 import hashlib
 from types import ModuleType
 from pathlib import Path
 from typing import List, TypeVar
 from fastmcp import FastMCP
-from modules.utils.log_utils import get_logger
+from modules.utils.log_utils import get_logger # , log_tree
 
 
 T = TypeVar("T", bound=FastMCP)

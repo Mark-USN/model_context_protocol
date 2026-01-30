@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, is_dataclass
 import logging
 import os
 import sys
@@ -57,27 +57,30 @@ class ContextAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
-def configure_logging(cfg: LogConfig | None = None) -> None:
+def configure_logging(cfg: LogConfig | None = None, *, force: bool = False) -> None:
     """Idempotent-ish basic configuration for console apps.
 
     - Safe to call early in your entrypoint (server/client).
-    - If handlers already exist on the root logger, we won't override them.
+    - If handlers already exist on the root logger, we won't override them,
+      unless force=True.
     """
     cfg = cfg or LogConfig()
 
-    root_logger = get_logger()
-    if root_logger.handlers:
-        # Someone already configured logging (tests, host app, etc.).
+    root_logger = logging.getLogger()
+
+    if root_logger.handlers and not force:
         return
 
     level = _parse_level(cfg.level)
     root_logger.setLevel(level)
 
+    if force:
+        root_logger.handlers.clear()
+
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.setLevel(level)
     handler.setFormatter(_ContextFormatter(cfg.fmt, datefmt=cfg.datefmt))
     root_logger.addHandler(handler)
-
 
 def get_logger(
     name: str,
@@ -188,12 +191,12 @@ def format_tree(
     def _short(v: object) -> str:
         if isinstance(v, str):
             s = v.replace("\n", "\\n")
-            return s if len(s) <= max_str else f"{s[: max_str - 1]}…"
+            return s if len(s) <= max_str else f"{s[: max_str - 1]} "
         try:
             r = repr(v)
         except Exception as e:  # noqa: BLE001 (best-effort for logging)
             r = f"<repr failed: {type(e).__name__}: {e}>"
-        return r if len(r) <= max_str else f"{r[: max_str - 1]}…"
+        return r if len(r) <= max_str else f"{r[: max_str - 1]} "
 
     def _is_seq(v: object) -> bool:
         return isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray))
@@ -237,7 +240,56 @@ def format_tree(
 
         return None
 
+
+    def _coerce_to_walkable(v: object) -> object:
+        # Already walkable
+        if isinstance(v, Mapping):
+            return v
+        if isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
+            return v
+
+        # Pydantic v2 models
+        model_dump = getattr(v, "model_dump", None)
+        if callable(model_dump):
+            try:
+                return model_dump()
+            except Exception:
+                pass
+
+        # Pydantic v1 models (or other .dict()-style)
+        as_dict = getattr(v, "dict", None)
+        if callable(as_dict):
+            try:
+                return as_dict()
+            except Exception:
+                pass
+
+        # dataclasses
+        if is_dataclass(v):
+            try:
+                return asdict(v)
+            except Exception:
+                pass
+
+        # namedtuple-ish
+        _asdict = getattr(v, "_asdict", None)
+        if callable(_asdict):
+            try:
+                return _asdict()
+            except Exception:
+                pass
+
+        # plain objects with attributes (may fail for slots-only objects)
+        try:
+            return vars(v)
+        except TypeError:
+            return v
+
+
     def _walk(v: object, prefix: str, depth: int) -> None:
+
+        v = _coerce_to_walkable(v)
+
         if depth >= max_depth:
             lines.append(f"{prefix}<max_depth {max_depth} reached>")
             return
@@ -267,7 +319,7 @@ def format_tree(
             for k in keys:
                 if shown >= max_items:
                     remaining = max(0, len(keys) - shown)
-                    lines.append(f"{child_prefix}… <{remaining} more keys>")
+                    lines.append(f"{child_prefix}  <{remaining} more keys>")
                     break
 
                 key = str(k)
@@ -310,7 +362,7 @@ def format_tree(
                     lines.append(f"{prefix}[{i}]: {_short(item)}")
 
             if n > limit:
-                lines.append(f"{prefix}… <{n - limit} more items>")
+                lines.append(f"{prefix}  <{n - limit} more items>")
             return
 
         lines.append(f"{prefix}{_short(v)}")

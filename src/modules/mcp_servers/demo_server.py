@@ -7,11 +7,11 @@
 # TODO: 20251101 MMH Add resource_loader.py and resource_template_loader.py
 
 import argparse
-import logging
+# import logging
 import time
 from pathlib import Path
 from fastmcp import FastMCP
-from modules.utils.log_utils import configure_logging, get_logger
+from modules.utils.log_utils import LogConfig, configure_logging, get_logger # , log_tree
 from modules.utils.prompt_md_loader import register_prompts_from_markdown
 from modules.utils.prompt_loader import register_prompts
 from modules.utils.tool_loader import register_tools
@@ -70,7 +70,7 @@ def purge_cache(days: int = 7) -> None:
     audio_dir = resolve_cache_paths(
                 app_name = "audio",
                 start = Path(__file__)
-            )
+            ).base_cache_dir
     if audio_dir.exists():
         for f in audio_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
@@ -79,7 +79,7 @@ def purge_cache(days: int = 7) -> None:
     transcript_dir = resolve_cache_paths(
                 app_name = "transcripts",
                 start = Path(__file__)
-            )
+            ).base_cache_dir
     if transcript_dir.exists():
         for f in transcript_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     # -----------------------------
     # Logging setup
     # -----------------------------
-    configure_logging()
+    configure_logging(LogConfig(level="INFO"))
     
 
 

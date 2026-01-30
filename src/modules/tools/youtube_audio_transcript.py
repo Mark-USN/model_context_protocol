@@ -1,16 +1,16 @@
 ﻿from __future__ import annotations
 # import datetime
 import os
-import re
+# import re
 import json
-import logging
+# import logging
 import time
 import whisper
 import asyncio
 import concurrent.futures
 import threading
 from pathlib import Path
-from typing import Any, Tuple, List, Dict, Optional, TypeVar
+from typing import Any, List, Dict, Optional, TypeVar
 from yt_dlp import YoutubeDL
 from youtube_transcript_api import FetchedTranscript
 from dataclasses import dataclass
@@ -18,8 +18,8 @@ from collections.abc import Callable
 from fastmcp import FastMCP  # pylint: disable=unused-import
 from modules.utils.ffmpeg_bootstrap import ensure_ffmpeg_on_path, get_ffmpeg_binary_path
 from modules.utils.paths import resolve_cache_paths
-from modules.utils.youtube_ids import extract_video_id, is_video_id
-from modules.utils.log_utils import get_logger
+from modules.utils.youtube_ids import extract_video_id
+from modules.utils.log_utils import get_logger # , log_tree
 
 # from youtube_transcript_api import YouTubeTranscriptApi, FetchedTranscript
 
@@ -29,16 +29,6 @@ T = TypeVar("T", bound="FastMCP")
 # Logging setup
 # -----------------------------
 logger = get_logger(__name__)
-
-
-def _get_transcript_cache_path(video_id: str) -> Path:
-    """Return the path to the cached transcript JSON for this video."""
-
-    return resolve_cache_paths(
-        app_name = "transcripts",
-        start = Path(__file__)).app_cache_dir / f"{video_id}.json"
-
-
 
 PREFERRED_LANGS = ["en", "en-US", "en-GB", "es", "es-419", "es-ES"]
 
@@ -52,49 +42,25 @@ CHUNK_OVERLAP_SECONDS = 5.0
 
 
 # # ----------------- Helpers -----------------
-# def get_video_id(url: str) -> str:
-#     """Extract the YouTube video ID from a URL.
-#         Args: url: The YouTube video URL.
-#     """
-#     url = url.strip()
-#     if not url:
-#         raise ValueError("Empty URL")
-
-#     # Short-link service: https://youtu.be/VIDEO_ID
-#     m = re.search(r"youtu\.be/([A-Za-z0-9_\-]{6,})", url)
-#     if m:
-#         return m.group(1)
-
-#     # Standard watch URLs: https://www.youtube.com/watch?v=VIDEO_ID
-#     m = re.search(r"[?&]v=([A-Za-z0-9_\-]{6,})", url)
-#     if m:
-#         return m.group(1)
-
-#     raise ValueError("Invalid YouTube URL")
 
 # ----------------- Output management -----------------
-
-def _get_cache_dir() -> Path:
-    """Base folder for project cache (inside mymcpserver/cache)."""
-    return Path(__file__).resolve().parents[3] / "cache"
-
-def _get_transcripts_dir() -> Path:
-    """Folder for transcript cache."""
-    out_dir = _get_cache_dir() / "transcripts"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
 
 def _get_audio_dir() -> Path:
     """Folder for temporary storage of yt_dlp audio cache.
     We delete these if they are over a day old in the code below.
     """
-    out_dir = _get_cache_dir() / "audio"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir
+    return resolve_cache_paths(
+        app_name = "audio",
+        start = Path(__file__)).app_cache_dir 
+
 
 def _get_transcript_cache_path(video_id: str) -> Path:
-    """Return the path to the cached Whisper transcript JSON for this video."""
-    return _get_transcripts_dir() / f"{video_id}.json"
+    """Return the path to the cached transcript JSON for this video."""
+
+    return resolve_cache_paths(
+        app_name = "transcripts",
+        start = Path(__file__)).app_cache_dir / f"{video_id}.json"
+
 
 # ----------------- Audio + Whisper -----------------
 
@@ -736,7 +702,7 @@ def register_long(mcp: T) -> None:
 # ----------------- CLI -----------------
 
 
-def main() -> None:
+def test() -> None:
     """ CLI entry point to test the YouTube to text tool. """
     import fastmcp, torch
     from datetime import timedelta
@@ -783,5 +749,5 @@ def main() -> None:
     print(f"\n✅ Transcribed in {str(timedelta(seconds=elapsed))} seconds.\n")
     
 if __name__ == "__main__":
-    main()
+    test()
 

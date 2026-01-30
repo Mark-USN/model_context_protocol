@@ -1,9 +1,8 @@
 import asyncio
-import logging
+# import logging
 import random
 import time
-from typing import Any, Dict, Optional
-from modules.utils.log_utils import get_logger
+from modules.utils.log_utils import get_logger # , log_tree
 
 
 logger = get_logger(__name__)
@@ -47,7 +46,7 @@ class JobClientMixin:
             state = s.get("state")
             job = s.get("job_id")
             progress = s.get("progress")
-            logger.info(f"Job: {job} State: {state} Progress: {progress}.")
+            logger.info("Job: %s State: %s Progress: %s.", job, state, progress)
             if state in ("done", "failed", "timed_out", "canceled"):
                 break
 

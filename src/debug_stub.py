@@ -2,10 +2,10 @@
 
 # import signal
 import asyncio
-import logging
+# import logging
 import argparse
 import sys
-from modules.utils.log_utils import configure_logging, get_logger
+from modules.utils.log_utils import configure_logging, get_logger # , log_tree
 
 # -----------------------------
 # Logging setup
@@ -49,10 +49,10 @@ def debug_stub():
             # from modules.utils.api_keys import api_vault
             # api_keys = api_vault()
             # google_key = api_keys.get_value("GOOGLE_KEY")
-            yt_search.main()
+            yt_search.test()
         case "yt-audio":
             import modules.tools.youtube_audio_transcript as yt_audio
-            yt_audio.main()
+            yt_audio.test()
 
 if __name__ == "__main__":
     # -----------------------------

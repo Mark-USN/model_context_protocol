@@ -23,27 +23,25 @@ Source baseline: /mnt/data/youtube_search.py :contentReference[oaicite:0]{index=
 
 from __future__ import annotations
 
-import json
+# import json
 import logging
 import re
 import threading
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Annotated
-from urllib.parse import parse_qs, urlparse
 from pydantic import Field
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from fastmcp import FastMCP
 from modules.utils.youtube_ids import (
         extract_video_id,
-        is_video_id,
         is_playlist_id,
         extract_playlist_id
     )
 from modules.utils.api_keys import api_vault
-from modules.utils.log_utils import get_logger
+from modules.utils.log_utils import get_logger, log_tree
 logger = get_logger(__name__)
 
 # A small, process-wide throttle to avoid overwhelming upstream services when a
@@ -51,81 +49,92 @@ logger = get_logger(__name__)
 _MAX_CONCURRENT_FETCHES = int(os.environ.get("MCP_SEARCH_MAX_CONCURRENCY", "6"))
 _SEARCH_SEM = threading.BoundedSemaphore(value=max(1, _MAX_CONCURRENT_FETCHES))
 
-# ---------------------------------------------------------------------------
-# Logging helpers (same style as the old commented-out log_youtube_search_result)
-# ---------------------------------------------------------------------------
+# # ---------------------------------------------------------------------------
+# # Logging helpers (same style as the old commented-out log_youtube_search_result)
+# # ---------------------------------------------------------------------------
 
-def _indent_block(text: str, *, spaces: int = 2) -> str:
-    pad = " " * spaces
-    return "\n".join(pad + line if line else line for line in text.splitlines())
+# def _indent_block(text: str, *, spaces: int = 2) -> str:
+#     pad = " " * spaces
+#     return "\n".join(pad + line if line else line for line in text.splitlines())
 
 
-def log_tool_result(
-    tool_name: str,
-    result: Mapping[str, Any],
-    *,
-    level: int = logging.INFO,
-    indent: int = 2,
-    items_key: str = "items",
-) -> None:
-    """Pretty-log a tool result with per-item indentation.
+# def log_tool_result(
+#     tool_name: str,
+#     result: Mapping[str, Any],
+#     *,
+#     level: int = logging.INFO,
+#     indent: int = 2,
+#     items_key: str = "items",
+# ) -> None:
+#     """Pretty-log a tool result with per-item indentation.
 
-    Logging behavior:
-      - If result[items_key] is a list: logs each element as JSON
-      - If result[items_key] is a dict: logs each (key,value) as {key: value} JSON
-    """
-    if not logger.isEnabledFor(level):
-        return
+#     Logging behavior:
+#       - If result[items_key] is a list: logs each element as JSON
+#       - If result[items_key] is a dict: logs each (key,value) as {key: value} JSON
+#     """
+#     if not logger.isEnabledFor(level):
+#         return
 
-    header_bits: list[str] = [tool_name]
-    for k in (
-        "query",
-        "order",
-        "maxResults",
-        "kinds",
-        "inputs_count",
-        "video_ids_count",
-        "playlist_ids_count",
-        "max_videos",
-    ):
-        if k in result:
-            header_bits.append(f"{k}={result.get(k)!r}")
-    logger.log(level, "OK %s", " ".join(header_bits))
+#     header_bits: list[str] = [tool_name]
+#     for k in (
+#         "query",
+#         "order",
+#         "maxResults",
+#         "kinds",
+#         "inputs_count",
+#         "video_ids_count",
+#         "playlist_ids_count",
+#         "max_videos",
+#     ):
+#         if k in result:
+#             header_bits.append(f"{k}={result.get(k)!r}")
+#     logger.log(level, "OK %s", " ".join(header_bits))
 
-    items = result.get(items_key)
-    if not items:
-        logger.log(level, "  (no %s returned)", items_key)
-        return
+#     items = result.get(items_key)
+#     if not items:
+#         logger.log(level, "  (no %s returned)", items_key)
+#         return
 
-    if isinstance(items, Mapping):
-        for idx, (key, item) in enumerate(items.items(), start=1):
-            pretty = json.dumps({key: item}, indent=indent, ensure_ascii=False, default=str)
-            logger.log(level, "  [%d]\n%s", idx, _indent_block(pretty, spaces=4))
-        return
+#     if isinstance(items, Mapping):
+#         for idx, (key, item) in enumerate(items.items(), start=1):
+#             pretty = json.dumps({key: item}, indent=indent, ensure_ascii=False, default=str)
+#             logger.log(level, "  [%d]\n%s", idx, _indent_block(pretty, spaces=4))
+#         return
 
-    if isinstance(items, list):
-        for idx, item in enumerate(items, start=1):
-            pretty = json.dumps(item, indent=indent, ensure_ascii=False, default=str)
-            logger.log(level, "  [%d]\n%s", idx, _indent_block(pretty, spaces=4))
-        return
+#     if isinstance(items, list):
+#         for idx, item in enumerate(items, start=1):
+#             pretty = json.dumps(item, indent=indent, ensure_ascii=False, default=str)
+#             logger.log(level, "  [%d]\n%s", idx, _indent_block(pretty, spaces=4))
+#         return
 
-    pretty = json.dumps(items, indent=indent, ensure_ascii=False, default=str)
-    logger.log(level, "  %s", _indent_block(pretty, spaces=2))
+#     pretty = json.dumps(items, indent=indent, ensure_ascii=False, default=str)
+#     logger.log(level, "  %s", _indent_block(pretty, spaces=2))
 
 
 def yt_execute(req, *, label: str = "") -> dict[str, Any]:
     """Execute a googleapiclient request with debug logging."""
     if logger.isEnabledFor(logging.DEBUG):
+        log_tree(
+            logger,
+            logging.INFO,
+            "Server Request",
+            req,
+            collapse_keys={"env"},  # env can be huge/noisy
+            redact_keys={"token", "api_key"},
+        )
+
         logger.debug("[YT %s] %s %s", label, getattr(req, "method", ""), getattr(req, "uri", ""))
     try:
         with _SEARCH_SEM:
             resp = req.execute()
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "[YT %s] response: items=%d keys=%s",
-                    label,
-                    len(resp.get("items", []) or []),
-                    list(resp.keys()),
+                log_tree(
+                    logger,
+                    logging.INFO,
+                    "Server Response",
+                    resp,
+                    collapse_keys={"env"},  # env can be huge/noisy
+                    redact_keys={"token", "api_key"},
                 )
             return resp
     except Exception as exc:  # pragma: no cover
@@ -261,48 +270,9 @@ def merge_outer(target: dict[str, dict[str, Any]], source: dict[str, dict[str, A
             target[outer_key].update(inner_updates)
 
 
-# def extract_video_id(url_or_id: str) -> str | None:
-#     s = (url_or_id or "").strip()
-#     if _VIDEO_ID_RE.match(s):
-#         return s
+def _coerce_to_list_str(x: str | list[str]) -> list[str]:
+    return x if isinstance(x, list) else [x]
 
-#     p = urlparse(s)
-#     host = (p.netloc or "").lower()
-#     path = p.path.strip("/")
-
-#     if "youtube.com" in host:
-#         qs = parse_qs(p.query)
-#         v = (qs.get("v") or [None])[0]
-#         if v and _VIDEO_ID_RE.match(v):
-#             return v
-
-#         parts = path.split("/")
-#         if len(parts) >= 2 and parts[0] in {"shorts", "embed", "v"}:
-#             cand = parts[1]
-#             if _VIDEO_ID_RE.match(cand):
-#                 return cand
-
-#     if "youtu.be" in host:
-#         cand = path.split("/")[0]
-#         if _VIDEO_ID_RE.match(cand):
-#             return cand
-
-#     return None
-
-
-# def extract_playlist_id(url_or_id: str) -> str | None:
-#     s = (url_or_id or "").strip()
-
-#     if _PLAYLIST_ID_RE.match(s) and not _VIDEO_ID_RE.match(s):
-#         return s
-
-#     p = urlparse(s)
-#     qs = parse_qs(p.query)
-#     pl = (qs.get("list") or [None])[0]
-#     if pl and _PLAYLIST_ID_RE.match(pl):
-#         return pl
-
-#     return None
 
 
 def normalize_video_inputs(inputs: Iterable[str]) -> tuple[list[str], list[dict[str, Any]]]:
@@ -332,9 +302,6 @@ def normalize_playlist_inputs(inputs: Iterable[str]) -> tuple[list[str], list[di
 
     return list(dedupe_preserve_order(playlist_ids)), errors
 
-
-def _coerce_to_list_str(x: str | list[str]) -> list[str]:
-    return x if isinstance(x, list) else [x]
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +610,16 @@ def youtube_search(
             "items": [],
             "errors": [{"error": "YouTube API error", "details": str(e)}],
         }
-        log_tool_result("youtube_search", result, level=logging.DEBUG)
+        log_tree(
+            logger,
+            logging.DEBUG,
+            "result",
+            result,
+            collapse_keys={"env"},  # env can be huge/noisy
+            redact_keys={"token", "api_key"},
+        )
+        # log_tool_result("youtube_search", result, level=logging.DEBUG)
+
         return result
 
     search_items: list[dict[str, Any]] = resp.get("items") or []
@@ -658,7 +634,7 @@ def youtube_search(
         "errors": [],
     }
 
-    log_tool_result("youtube_search", result, level=logging.DEBUG)
+    # log_tool_result("youtube_search", result, level=logging.DEBUG)
     return result
 
 
@@ -685,7 +661,7 @@ def youtube_video_info(
         "errors": errors,
     }
 
-    log_tool_result("youtube_video_info", result, level=logging.DEBUG)
+    # log_tool_result("youtube_video_info", result, level=logging.DEBUG)
     return result
 
 
@@ -734,10 +710,10 @@ def youtube_playlist_info(
 
     if isinstance(playlist, list):
         result: dict[str, Any] | list[dict[str, Any]] = out
-        log_tool_result("youtube_playlist_info", {"playlist_ids_count": len(out), "items": out}, level=logging.DEBUG)
+        # log_tool_result("youtube_playlist_info", {"playlist_ids_count": len(out), "items": out}, level=logging.DEBUG)
     else:
         result = out[0] if out else {}
-        log_tool_result("youtube_playlist_info", {"playlist_ids_count": 1, "items": [result]}, level=logging.DEBUG)
+        # log_tool_result("youtube_playlist_info", {"playlist_ids_count": 1, "items": [result]}, level=logging.DEBUG)
 
     return result
 
@@ -834,18 +810,18 @@ def youtube_playlist_video_list(
 
     if isinstance(playlist, list):
         result: dict[str, Any] | list[dict[str, Any]] = out
-        log_tool_result(
-            "youtube_playlist_video_list",
-            {"playlist_ids_count": len(out), "max_videos": max_videos, "items": out},
-            level=logging.DEBUG,
-        )
+        # log_tool_result(
+        #     "youtube_playlist_video_list",
+        #     {"playlist_ids_count": len(out), "max_videos": max_videos, "items": out},
+        #     level=logging.DEBUG,
+        # )
     else:
         result = out[0] if out else {}
-        log_tool_result(
-            "youtube_playlist_video_list",
-            {"playlist_ids_count": 1, "max_videos": max_videos, "items": [result]},
-            level=logging.DEBUG,
-        )
+        # log_tool_result(
+        #     "youtube_playlist_video_list",
+        #     {"playlist_ids_count": 1, "max_videos": max_videos, "items": [result]},
+        #     level=logging.DEBUG,
+        # )
 
     return result
 
@@ -865,7 +841,7 @@ def test() -> None:
 
     logger.info("Executing youtube_search(query=%s)", yt_search)
     sr = youtube_search(query=yt_search, order="date", max_results=5, kinds="video,playlist")
-    log_tool_result("youtube_search", sr, level=logging.INFO)
+    # log_tool_result("youtube_search", sr, level=logging.INFO)
 
     playlist_ids = [it.get("playlist_id") for it in sr.get("items", []) if it.get("kind") == "playlist"]
     playlist_ids = [pid for pid in playlist_ids if pid]
@@ -873,21 +849,21 @@ def test() -> None:
     if playlist_ids:
         logger.info("Fetching playlist info only (no expansion)")
         pi = youtube_playlist_info(playlist=playlist_ids[:2])
-        log_tool_result("youtube_playlist_info", {"items": pi if isinstance(pi, list) else [pi]}, level=logging.INFO)
+        # log_tool_result("youtube_playlist_info", {"items": pi if isinstance(pi, list) else [pi]}, level=logging.INFO)
 
         logger.info("Expanding playlist videos (opt-in)")
         pv = youtube_playlist_video_list(playlist=playlist_ids[0], max_videos=10)
-        if isinstance(pv, dict):
-            log_tool_result("youtube_playlist_video_list", {"items": pv.get("items", {})}, level=logging.INFO, items_key="items")
+        # if isinstance(pv, dict):
+        #     log_tool_result("youtube_playlist_video_list", {"items": pv.get("items", {})}, level=logging.INFO, items_key="items")
 
 # -------------------------------------------------------------------------------
 # Search for Playlists only
 # -------------------------------------------------------------------------------
 
 
-    logger.info("Executing youtube_search(query=%s)", yt_search)
+    # logger.info("Executing youtube_search(query=%s)", yt_search)
     sr = youtube_search(query=yt_search, order="date", max_results=5, kinds="playlist")
-    log_tool_result("youtube_search", sr, level=logging.INFO)
+    # log_tool_result("youtube_search", sr, level=logging.INFO)
 
     playlist_ids = [it.get("playlist_id") for it in sr.get("items", []) if it.get("kind") == "playlist"]
     playlist_ids = [pid for pid in playlist_ids if pid]
@@ -895,8 +871,8 @@ def test() -> None:
     if playlist_ids:
         logger.info("Expanding playlist videos (opt-in)")
         pv = youtube_playlist_video_list(playlist=playlist_ids[0], max_videos=3)
-        if isinstance(pv, dict):
-            log_tool_result("youtube_playlist_video_list", {"items": pv.get("items", {})}, level=logging.INFO, items_key="items")
+        # if isinstance(pv, dict):
+        #     log_tool_result("youtube_playlist_video_list", {"items": pv.get("items", {})}, level=logging.INFO, items_key="items")
 
 
 if __name__ == "__main__":

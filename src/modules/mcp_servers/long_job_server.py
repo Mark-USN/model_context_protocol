@@ -1,26 +1,11 @@
 ﻿""" MCP module: HMAC-authenticated long-running jobs with session isolation."""
-# import os
-# import sys
-# import hmac
-# import json
-# import uuid
-# import base64
-#import asyncio
-# import inspect
-# from contextlib import contextmanager
-# from functools import wraps
-# import importlib
-# import pkgutil
-# from dataclasses import dataclass, field
-# from enum import Enum
-# from modules.utils.tokens import requires_token
 import time
 import argparse
-import logging
+# import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
+# from typing import Any, Callable, Dict, Optional, TypeVar
 from fastmcp import FastMCP
-from modules.utils.log_utils import configure_logging, get_logger
+from modules.utils.log_utils import LogConfig, configure_logging, get_logger # , log_tree
 from modules.utils.jobs import long_tools_require_token
 from modules.utils.prompt_md_loader import register_prompts_from_markdown
 from modules.utils.prompt_loader import register_prompts
@@ -83,7 +68,7 @@ def purge_server_cache(days: int = 7) -> None:
     audio_dir = resolve_cache_paths(
                 app_name = "audio",
                 start = Path(__file__)
-            )
+            ).base_cache_dir
     if audio_dir.exists():
         for f in audio_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
@@ -92,7 +77,7 @@ def purge_server_cache(days: int = 7) -> None:
     transcript_dir = resolve_cache_paths(
                 app_name = "transcripts",
                 start = Path(__file__)
-            )
+            ).base_cache_dir
     if transcript_dir.exists():
         for f in transcript_dir.iterdir():
             if f.is_file() and f.stat().mt_atime < cutoff:
@@ -158,5 +143,5 @@ if __name__ == "__main__":
     # -----------------------------
     # Logging setup
     # -----------------------------
-    configure_logging()
+    configure_logging(LogConfig(level="INFO"))
     main()

@@ -8,13 +8,13 @@ imports them safely, and registers them into an MCP server.
 import importlib
 import pkgutil
 import json
-import logging
+# import logging
 from types import ModuleType
 from typing import Any, List, TypeVar
 from pathlib import Path
 import frontmatter
 from fastmcp import FastMCP
-from modules.utils.log_utils import get_logger
+from modules.utils.log_utils import get_logger # , log_tree
 
 T = TypeVar("T", bound=FastMCP)
 
