@@ -8,6 +8,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastmcp>=2.13.0.2",
     "google-api-python-client>=2.187.0",
+    "openai>=2.16.0",
     "openai-whisper>=20250625",
     "pylint>=4.0.2",
     "python-frontmatter>=1.1.0",

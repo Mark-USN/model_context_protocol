@@ -14,6 +14,11 @@ T = TypeVar("T", bound=FastMCP)
 
 logger = get_logger(__name__)
 
+from __future__ import annotations
+
+from pydantic import Field
+
+
 def youtube_query_normalizer_prompt(
     search_string: str = Field(
         description=(
@@ -32,29 +37,39 @@ Input:
 
 Task:
 Convert search_string into a Google/YouTube advanced search query string that preserves intent and constraints.
+Also extract structured components from the SAME input (do not invent any terms).
 
 Rules:
 1) Preserve exact phrases:
-   - Keep quoted text exactly as a phrase, including quotes.
+   - Keep quoted text exactly as a phrase in the query, including quotes.
      Example: "quantum diffraction"
+   - Populate "phrases" with each quoted phrase WITHOUT the surrounding quotes.
+     Example: "quantum diffraction" -> phrases includes ["quantum diffraction"]
 
 2) Handle includes/excludes:
-   - +term means REQUIRED → include the term in the query (required).
-   - -term means EXCLUDED → keep it as a negated term.
+   - +term means REQUIRED:
+       * Ensure the term appears in the query as a normal (non-prefixed) term.
+       * Add the raw term (without '+') to "includes".
+   - -term means EXCLUDED:
+       * Ensure the term appears in the query as a negated term (e.g., -term).
+       * Add the raw term (without '-') to "excludes".
    - Do not invent new terms.
 
 3) Boolean logic:
-   - Preserve OR / | (case-insensitive) by grouping with parentheses.
+   - Preserve OR / | (case-insensitive) by grouping with parentheses where needed.
      Example: (slit OR grating)
 
 4) Restrictions:
-   - Preserve title:xxx as a title restriction.
-   - Preserve channel:Name as a channel restriction.
+   - Preserve title:xxx as a title restriction in the query.
+   - Preserve channel:Name as a channel restriction in the query.
+   - Populate "channels" with each channel name WITHOUT the "channel:" prefix.
    - Do not add site: filters unless explicitly requested.
 
 5) Normalization:
-   - Normalize whitespace.
+   - Normalize whitespace (single spaces).
    - Keep operator precedence clear with parentheses where needed.
+   - Deduplicate items within includes/excludes/phrases/channels.
+   - Keep ordering stable: preserve first-appearance order from the input.
 
 Output:
 Return a JSON object with exactly these fields (and nothing else):
@@ -65,7 +80,7 @@ Return a JSON object with exactly these fields (and nothing else):
   "excludes": ["..."],
   "phrases": ["..."],
   "channels": ["..."],
-  "notes": "Short explanation of what was preserved/changed"
+  "notes": "One sentence max: what was preserved/normalized."
 }}
 
 Do NOT execute any search. Do NOT call any tools.

@@ -18,6 +18,7 @@ from typing import Any
 from modules.utils.youtube_ids import extract_video_id, extract_playlist_id
 # from urllib.parse import parse_qs, urlparse
 from modules.utils.log_utils import get_logger, log_tree
+from .prompt_exerciser import NormalizedQuery, post_filter
 
 
 logger = get_logger(__name__)
@@ -74,13 +75,31 @@ async def exercise_transcripts_round_robin(
 
         logger.info("Saved %s (%s)", out, timedelta(seconds=elapsed))
 
-
 # -------------------------------------------------
-# Main demo
+# Search exerciser
 # -------------------------------------------------
-async def run_youtube_demo(client: Any) -> None:
+async def exercise_youtube_search(client: Any) -> List[video_id | playlist_id]:
     if not client.yt_search:
         client.yt_search = "Python tutorials about list comprehension -shorts"
+    
+    logger.info("Executing youtube_query_normalizer prompt")
+    prompt_result = await self.get_prompt(
+        "youtube_query_normalizer",
+        {"search_string": client.yt_search},
+    )
+    ai_prompt = prompt_result.data # if isinstance(prompt_result.data, NormalizedQuery) else NormalizedQuery(**prompt_result.data)
+    ai_query = normalize_youtube_query(ai_prompt)
+
+
+
+
+
+
+
+
+
+
+
 
     logger.info("Running youtube_search: %s", client.yt_search)
     res = await client.call_tool(
@@ -105,6 +124,13 @@ async def run_youtube_demo(client: Any) -> None:
 
     payload = getattr(res, "data", {}) or {}
     items = payload.get("items") or []
+
+
+
+# -------------------------------------------------
+# Main demo
+# -------------------------------------------------
+async def run_youtube_demo(client: Any) -> None:
 
     video_urls: list[str] = []
     playlist_urls: list[str] = []
