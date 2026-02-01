@@ -14,12 +14,7 @@ T = TypeVar("T", bound=FastMCP)
 
 logger = get_logger(__name__)
 
-from __future__ import annotations
-
-from pydantic import Field
-
-
-def youtube_query_normalizer_prompt(
+def youtube_query_normalizer(
     search_string: str = Field(
         description=(
             "Raw user search string. May include quoted phrases, +required terms, -excluded terms, "
@@ -95,4 +90,4 @@ def register(mcp: T) -> None:
     logger.info("✅ Registering prompts")
 
     # YouTube-specific prompt (query normalization)
-    mcp.prompt(tags=["public", "api", "youtube"])(youtube_query_normalizer_prompt)
+    mcp.prompt(tags=["public", "api", "youtube"])(youtube_query_normalizer)

@@ -18,7 +18,14 @@ from typing import Any
 from modules.utils.youtube_ids import extract_video_id, extract_playlist_id
 # from urllib.parse import parse_qs, urlparse
 from modules.utils.log_utils import get_logger, log_tree
-from .prompt_exerciser import NormalizedQuery, post_filter
+from .ai_prompt import (
+    NormalizedQuery, 
+    mcp_messages_to_openai,
+    prompt_result_messages_to_llm,
+    normalize_youtube_query, 
+    post_filter, 
+    LlmMessage
+)
 
 
 logger = get_logger(__name__)
@@ -78,52 +85,72 @@ async def exercise_transcripts_round_robin(
 # -------------------------------------------------
 # Search exerciser
 # -------------------------------------------------
-async def exercise_youtube_search(client: Any) -> List[video_id | playlist_id]:
+async def exercise_youtube_search(client: Any) -> list[dict[str, Any]]:
     if not client.yt_search:
-        client.yt_search = "Python tutorials about list comprehension -shorts"
+        client.yt_search = "English language python tutorials about list comprehension do not include short videos."
     
     logger.info("Executing youtube_query_normalizer prompt")
-    prompt_result = await self.get_prompt(
+    prompt_result = await client.get_prompt(
         "youtube_query_normalizer",
         {"search_string": client.yt_search},
     )
-    ai_prompt = prompt_result.data # if isinstance(prompt_result.data, NormalizedQuery) else NormalizedQuery(**prompt_result.data)
-    ai_query = normalize_youtube_query(ai_prompt)
 
+    openai_messages = prompt_result_messages_to_llm(prompt_result.messages)
 
+    log_tree(
+            logger,
+            logging.INFO,
+            "OpenAI Messages:",
+            openai_messages,
+            collapse_keys={"env"},  # env can be huge/noisy
+            redact_keys={"token", "api_key"},
+        )
 
+    ai_query = normalize_youtube_query(openai_messages)
+    query = ai_query.query
+    log_tree(
+            logger,
+            logging.INFO,
+            "ai_query:",
+            ai_query,
+            collapse_keys={"env"},  # env can be huge/noisy
+            redact_keys={"token", "api_key"},
+        )
+    logger.info("Normalized YouTube query: %s", query)
 
-
-
-
-
-
-
-
-
-    logger.info("Running youtube_search: %s", client.yt_search)
-    res = await client.call_tool(
-        "youtube_search",
-        {
-            "query": client.yt_search,
+    yt_search_args: dict[str, Any] = {
+            "query": ai_query.query,
             "order": "relevance",
             "max_results": client.MAX_SEARCH_RESULTS,
-        },
-    )
+        }
+
+    logger.info("Running youtube_search:")
+    log_tree(
+            logger,
+            logging.INFO,
+            "youtube_search:",
+            yt_search_args,
+            collapse_keys={"env"},  # env can be huge/noisy
+            redact_keys={"token", "api_key"},
+        )
+
+    res = await client.call_tool("youtube_search", yt_search_args)
+    call_title = 'youtube_search('
+    f'query: {yt_search_args["query"]}, '
+    f'order: {yt_search_args["order"]}, '
+    f'max_results: {yt_search_args["max_results"]})'
 
     log_tree(
         logger,
         logging.INFO,
-        f"youtube_search(query:{client.yt_search}, "
-        "order: relevance, "
-        f"max_results: {client.MAX_SEARCH_RESULTS}):",
+        call_title,
         res,
         collapse_keys={"env"},  # env can be huge/noisy
         redact_keys={"token", "api_key"},
     )
 
     payload = getattr(res, "data", {}) or {}
-    items = payload.get("items") or []
+    return payload.get("items") or []
 
 
 
@@ -134,6 +161,8 @@ async def run_youtube_demo(client: Any) -> None:
 
     video_urls: list[str] = []
     playlist_urls: list[str] = []
+
+    items = await exercise_youtube_search(client)
 
     for itm in items:
         url = itm.get("url") or ""

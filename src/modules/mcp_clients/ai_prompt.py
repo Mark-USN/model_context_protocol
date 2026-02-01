@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-
+from typing import Any, Annotated,Iterable
 from openai import OpenAI
 from modules.utils.api_keys import api_vault
 
@@ -45,29 +45,114 @@ YOUTUBE_QUERY_SCHEMA = {
 }
 
 
-def normalize_youtube_query(search_string: str) -> NormalizedQuery:
-    # Use YOUR prompt generator to create the content
-    prompt_messages = youtube_query_normalizer_prompt(search_string=search_string)
+@dataclass(slots=True)
+class LlmMessage:
+    role: str
+    content: str
 
-    # Convert your Message objects into OpenAI "input" messages if needed
-    # (Assuming Message has .content and maybe a role; if not, adapt this part.)
-    input_messages = [{"role": "user", "content": prompt_messages[0].content}]
 
+def _coerce_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+
+    # TextContent(...) with .text
+    text = getattr(content, "text", None)
+    if isinstance(text, str):
+        return text
+
+    # If your MCP ever returns a list of parts, join text parts
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            t = getattr(part, "text", None)
+            if isinstance(t, str):
+                parts.append(t)
+        if parts:
+            return "\n".join(parts)
+
+    raise TypeError(f"Unsupported content type for OpenAI: {type(content)!r}")
+
+def _get(obj: Any, name: str) -> Any:
+    """Read field `name` from dict-like OR attribute-like objects."""
+    if isinstance(obj, dict):
+        return obj[name]
+    return getattr(obj, name)
+
+
+
+def mcp_messages_to_openai(messages: list[Any]) -> list[dict[str,str]]:
+    return [{"role": str(m.role), "content": _coerce_content_to_text(m.content)} for m in messages]
+
+
+def prompt_result_messages_to_llm(messages: Any) -> list[LlmMessage]:
+    """
+    Normalize `PromptResult.messages` into a stable `list[LlmMessage]`.
+
+    Handles FastMCP return shapes:
+      - messages is str  -> one user message
+      - messages is list -> each element may be dict-like or attribute-like
+    """
+    # FastMCP docs: PromptResult.messages can be str or list[Message]. :contentReference[oaicite:1]{index=1}
+    if isinstance(messages, str):
+        return [LlmMessage(role="user", content=messages)]
+
+    if not isinstance(messages, Iterable):
+        raise TypeError(f"Expected messages to be str or iterable, got {type(messages)!r}")
+
+    out: list[LlmMessage] = []
+    for m in messages:
+        role = str(_get(m, "role"))
+        content = _coerce_content_to_text(_get(m, "content"))
+        out.append(LlmMessage(role=role, content=content))
+
+    return out
+
+def _messages_to_openai_input(messages: list[LlmMessage]) -> list[dict[str, Any]]:
+    """
+    Convert internal messages to OpenAI Responses API input items.
+
+    This uses a simple pattern: one 'message' item per LlmMessage.
+    """
+    return [
+        {
+            "role": m.role,
+            "content": [{"type": "input_text", "text": m.content}],
+        }
+        for m in messages
+    ]
+
+
+def normalize_youtube_query(messages: list[LlmMessage]) -> NormalizedQuery:
     resp = _get_openai_client().responses.create(
         model="gpt-5.2",
-        input=input_messages,
-        text=YOUTUBE_QUERY_SCHEMA,  # enforce schema
+        input=_messages_to_openai_input(messages),
+        # If you want stricter behavior, you can add:
+        # temperature=0,
     )
 
-    data = json.loads(resp.output_text)
-    return NormalizedQuery(**data)
+    # Most reliable: treat model output as JSON string and validate locally.
+    raw = resp.output_text.strip()
+    data = json.loads(raw)
+
+    # Construct the typed result (dataclass/pydantic/etc.)
+    return NormalizedQuery(
+        query=str(data["query"]),
+        includes=list(data.get("includes", [])),
+        excludes=list(data.get("excludes", [])),
+        phrases=list(data.get("phrases", [])),
+        channels=list(data.get("channels", [])),
+        notes=str(data.get("notes", "")),
+    )
 
 
 def post_filter(
-    results: list[YouTubeResult],
+    results: list[dict[str, Any]],
     normalized: NormalizedQuery,
-) -> list[YouTubeResult]:
-    filtered: list[YouTubeResult] = []
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
 
     for r in results:
         title = r.title.lower()

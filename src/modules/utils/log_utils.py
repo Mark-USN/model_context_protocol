@@ -81,6 +81,10 @@ def configure_logging(cfg: LogConfig | None = None, *, force: bool = False) -> N
     handler.setLevel(level)
     handler.setFormatter(_ContextFormatter(cfg.fmt, datefmt=cfg.datefmt))
     root_logger.addHandler(handler)
+    # Optional: quiet noisy libraries
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def get_logger(
     name: str,
@@ -168,7 +172,7 @@ def format_tree(
     indent: int = 2,
     max_depth: int = 10,
     max_items: int = 50,
-    max_str: int = 200,
+    max_str: int = 500,
     sort_dict_keys: bool = False,
     collapse_keys: set[str] | None = None,
     redact_keys: set[str] | None = None,

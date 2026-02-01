@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 # from collections.abc import Iterable
@@ -98,3 +98,4 @@ def extract_any_identifier(text: str) -> YoutubeIdentifier | None:
     if kind is YoutubeIdKind.UNKNOWN:
         return None
     return YoutubeIdentifier(kind, text)
+

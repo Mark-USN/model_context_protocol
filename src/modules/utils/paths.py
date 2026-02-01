@@ -1,4 +1,4 @@
-"""
+﻿"""
 src/modules/utils/paths.py
 
 Project path helpers for a repo layout like:

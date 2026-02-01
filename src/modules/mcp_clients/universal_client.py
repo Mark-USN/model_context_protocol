@@ -142,7 +142,7 @@ class UniversalClient(Client):
         )
 
         # 20260125 MMH dump the result from youtube_query_normalizer
-        logger.info("youtube_query_normalizer result = \n%s",json.dumps(result, indent=2, ensure_ascii=False))
+        # logger.info("youtube_query_normalizer result = \n%s",json.dumps(result.messages[0].content, indent=2, ensure_ascii=False))
 
         for msg in getattr(result, "messages", []) or []:
             logger.info("Prompt output: %s", getattr(msg, "content", msg))

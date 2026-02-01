@@ -143,7 +143,6 @@ def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> Non
         except OSError:
             pass
 
-
 def _get_transcript_cache_path(video_id: str) -> Path:
     """Return the path to the cached transcript JSON for this video."""
 

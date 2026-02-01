@@ -56,7 +56,9 @@ mcp = FastMCP(
     # strict_input_validation=False,
     include_fastmcp_meta=False,
 )
-def purge_cache(days: int = 7) -> None:
+
+
+def purge_server_cache(days: int = 1) -> None:
     """ Purge transcript cache files older than `days` days.
         Args:
             days (int): Number of days to keep cache files. Default is 7 days.
@@ -73,7 +75,7 @@ def purge_cache(days: int = 7) -> None:
             ).base_cache_dir
     if audio_dir.exists():
         for f in audio_dir.iterdir():
-            if f.is_file() and f.stat().mt_atime < cutoff:
+            if f.is_file() and f.stat().st_atime < cutoff:
                 f.unlink(missing_ok=True)
 
     transcript_dir = resolve_cache_paths(
@@ -82,7 +84,7 @@ def purge_cache(days: int = 7) -> None:
             ).base_cache_dir
     if transcript_dir.exists():
         for f in transcript_dir.iterdir():
-            if f.is_file() and f.stat().mt_atime < cutoff:
+            if f.is_file() and f.stat().st_atime < cutoff:
                 f.unlink(missing_ok=True)
 
 
@@ -95,6 +97,10 @@ def attach_everything():
         Any error in a file will cause the tools or prompts in that package to be ignored.
         Make sure you trust the code in those packages!
     """
+
+    # Purge old cache files on server startup
+    purge_server_cache(days=1)
+
     register_tools(mcp, package=_get_tools_dir())
     logger.info("✅	 Tools registered.")
 
